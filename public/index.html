@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Plan Portal | BKIVV</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .otp-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900" x-data="portalApp()">
+
+    <!-- Header -->
+    <header class="bg-white border-b sticky top-0 z-30">
+        <div class="max-w-md mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">B</div>
+                <h1 class="font-bold text-lg tracking-tight">Mobile Plan</h1>
+            </div>
+            <template x-if="isLoggedIn">
+                <div class="flex items-center gap-3">
+                    <template x-if="profile.isAdmin">
+                        <a href="admin-dashboard.html" class="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors flex items-center gap-1" title="Admin Dashboard">
+                            <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+                            <span class="text-xs font-bold hidden sm:inline">Admin</span>
+                        </a>
+                    </template>
+                    <button @click="logout()" class="text-gray-500 hover:text-red-600 transition-colors">
+                        <i data-lucide="log-out" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </template>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto p-4 pb-24">
+
+        <!-- 1. Login Screen -->
+        <div x-show="step === 'login'" x-cloak class="space-y-6 py-8">
+            <div class="text-center space-y-2">
+                <h2 class="text-2xl font-bold">Welcome</h2>
+                <p class="text-gray-500">Login to your Mobile Plan Portal</p>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border space-y-6">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                        <input type="email" x-model="email" @keydown.enter="requestOtp('AUTO')" placeholder="name@bkivv.org" autocomplete="off"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                    </div>
+                    <button @click="requestOtp('AUTO')" :disabled="loading"
+                            class="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                        <span x-show="!loading">Login</span>
+                        <span x-show="loading" class="animate-spin border-2 border-white border-t-transparent rounded-full w-5 h-5"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. OTP Screen -->
+        <div x-show="step === 'otp'" x-cloak class="space-y-6 py-8">
+            <div class="text-center space-y-2">
+                <h2 class="text-2xl font-bold" x-text="loginMethod === 'TELEGRAM' ? 'Verify Telegram' : 'Verify Email'"></h2>
+                <p class="text-gray-500">Enter the 6-digit code sent to <br>
+                    <span class="font-medium text-gray-900" x-text="loginMethod === 'TELEGRAM' ? 'your Telegram account' : email"></span>
+                </p>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border space-y-6">
+                <div class="flex justify-between gap-2">
+                    <template x-for="(digit, index) in otpArray">
+                        <input type="number" maxlength="1" 
+                               :id="'otp-' + index"
+                               x-model="otpArray[index]"
+                               @input="handleOtpInput($event, index)"
+                               @keydown.backspace="handleOtpBackspace($event, index)"
+                               @keydown.enter="verifyOtp()"
+                               class="w-12 h-14 text-center text-2xl font-bold rounded-xl border border-gray-200 otp-input outline-none transition-all"
+                               inputmode="numeric" pattern="[0-9]*">
+                    </template>
+                </div>
+                <button @click="verifyOtp()" :disabled="loading || otpArray.join('').length < 6"
+                        class="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                    <span x-show="!loading">Verify & Login</span>
+                    <span x-show="loading" class="animate-spin border-2 border-white border-t-transparent rounded-full w-5 h-5"></span>
+                </button>
+
+                <!-- Admin Quick Actions -->
+                <template x-if="isLoggedIn && profile.isAdmin">
+                    <div class="space-y-3 pt-4 border-t">
+                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Admin Quick Access</p>
+                        <div class="grid grid-cols-1 gap-2">
+                            <a href="all-requests.html" class="flex items-center justify-between px-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition-all">
+                                <span>All Requests</span>
+                                <i data-lucide="list" class="w-4 h-4"></i>
+                            </a>
+                            <a href="admin-dashboard.html" class="flex items-center justify-between px-4 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-100 transition-all">
+                                <span>Dashboard</span>
+                                <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                            </a>
+                            <button @click="step = 'dashboard'" class="flex items-center justify-between w-full px-4 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-100 transition-all">
+                                <span>Request Connection</span>
+                                <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+
+                <div class="text-center space-y-3">
+                    <p class="text-sm text-gray-500">Didn't receive the code?</p>
+                    
+                    <div x-show="!canResend" class="text-sm text-gray-400">
+                        Resend available in <span x-text="resendTimer"></span>s
+                    </div>
+
+                    <div x-show="canResend" class="flex flex-col gap-2">
+                        <button @click="resendOtp('TELEGRAM')" :disabled="loading"
+                                class="text-blue-600 font-semibold text-sm hover:text-blue-700 transition-colors">
+                            Resend via Telegram
+                        </button>
+                        <button @click="resendOtp('EMAIL')" :disabled="loading"
+                                class="text-blue-600 font-semibold text-sm hover:text-blue-700 transition-colors">
+                            Resend via Email
+                        </button>
+                    </div>
+                </div>
+
+                <button @click="step = 'login'" class="w-full text-blue-600 font-medium text-sm">Change Email</button>
+            </div>
+        </div>
+
+        <!-- 3. One-Time Setup -->
+        <div x-show="step === 'setup'" x-cloak class="space-y-6 py-4">
+            <div class="space-y-1">
+                <h2 class="text-xl font-bold">Complete Setup</h2>
+                <p class="text-gray-500 text-sm">Link your profile to your Unit UID</p>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Your Full Name <span class="text-red-500">*</span></label>
+                    <input type="text" x-model="profile.name" @keydown.enter="saveProfile()" placeholder="As per records" autocomplete="off"
+                           class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Primary Mobile Number <span class="text-red-500">*</span></label>
+                    <input type="tel" x-model="profile.primaryMobile" @keydown.enter="saveProfile()" placeholder="10 digit mobile" maxlength="10" autocomplete="off"
+                           @input="profile.primaryMobile = $event.target.value.replace(/\D/g, '')"
+                           class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Unit UID <span class="text-red-500">*</span></label>
+                    <div class="relative" x-data="{ open: false, search: '' }">
+                        <div class="relative">
+                            <input type="text" x-model="profile.uid" 
+                                   @focus="open = true; search = profile.uid" 
+                                   @input="open = true; search = profile.uid" 
+                                   @blur="setTimeout(() => { open = false; lookupUid(profile.uid) }, 200)"
+                                   @keydown.enter="saveProfile()"
+                                   @click.away="open = false"
+                                   placeholder="Search or Enter UID" autocomplete="off"
+                                   class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none pr-10">
+                            <div class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                                <i data-lucide="chevron-down" class="w-5 h-5"></i>
+                            </div>
+                        </div>
+                        <div x-show="open" class="absolute z-50 w-full mt-1 bg-white border rounded-xl shadow-xl max-h-60 overflow-y-auto">
+                            <div x-show="uidLoading" class="px-4 py-3 flex justify-center">
+                                <div class="animate-spin border-2 border-blue-600 border-t-transparent rounded-full w-5 h-5"></div>
+                            </div>
+                            <div x-show="!uidLoading && uids.length === 0" class="px-4 py-3 text-center">
+                                <p class="text-xs text-red-500 mb-2">Failed to load UIDs</p>
+                                <button @click.stop="fetchUids()" class="text-xs font-bold text-blue-600 hover:underline">Retry Loading</button>
+                            </div>
+                            <template x-for="u in (uids || []).filter(i => String(i.uid || '').toLowerCase().includes(String(search || '').toLowerCase()) || String(i.unitName || '').toLowerCase().includes(String(search || '').toLowerCase()))">
+                                <div @click="profile.uid = u.uid; lookupUid(u.uid); open = false; search = u.uid" 
+                                     class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b last:border-0">
+                                    <div class="font-bold text-sm" x-text="u.uid"></div>
+                                    <div class="text-xs text-gray-500" x-text="u.unitName"></div>
+                                </div>
+                            </template>
+                            <div x-show="(uids || []).filter(i => String(i.uid || '').toLowerCase().includes(String(search || '').toLowerCase()) || String(i.unitName || '').toLowerCase().includes(String(search || '').toLowerCase())).length === 0" 
+                                 class="px-4 py-3 text-sm text-gray-500 italic">
+                                No matching UIDs found
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="uidLoading" class="bg-blue-50/50 p-6 rounded-xl border border-dashed border-blue-200 flex flex-col items-center justify-center gap-3">
+                    <div class="animate-spin border-2 border-blue-600 border-t-transparent rounded-full w-6 h-6"></div>
+                    <p class="text-xs text-blue-600 font-bold uppercase tracking-widest">Fetching Unit Details...</p>
+                </div>
+
+                <template x-if="uidDetails && !uidLoading">
+                    <div class="bg-blue-50 p-4 rounded-xl space-y-3 border border-blue-100">
+                        <div class="flex justify-between text-xs text-blue-600 font-bold uppercase tracking-wider">
+                            <span>Zone: <span class="text-blue-900" x-text="uidDetails.zone"></span></span>
+                            <span>Sub-Zone: <span class="text-blue-900" x-text="uidDetails.subZone"></span></span>
+                        </div>
+                        
+                        <div class="pt-2 border-t border-blue-200">
+                            <span class="text-xs text-blue-600 font-bold uppercase tracking-wider">Unit Name</span>
+                            <div class="text-sm font-semibold text-blue-900" x-text="uidDetails.unitName"></div>
+                        </div>
+
+                        <!-- ZAC Info -->
+                        <div class="pt-2 border-t border-blue-200" x-show="uidDetails.zacs && uidDetails.zacs.length > 0">
+                            <span class="text-xs text-blue-600 font-bold uppercase tracking-wider">Zone Coordinators (ZAC)</span>
+                            <template x-for="zac in uidDetails.zacs">
+                                <div class="flex justify-between text-sm mt-1">
+                                    <span class="font-semibold text-blue-900" x-text="zac.name"></span>
+                                    <span class="text-blue-700" x-text="zac.contact"></span>
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- SAC Info -->
+                        <div class="pt-2 border-t border-blue-200" x-show="uidDetails.sacs && uidDetails.sacs.length > 0">
+                            <span class="text-xs text-blue-600 font-bold uppercase tracking-wider">Sub-Zone Coordinators (SAC)</span>
+                            <template x-for="sac in uidDetails.sacs">
+                                <div class="flex justify-between text-sm mt-1">
+                                    <span class="font-semibold text-blue-900" x-text="sac.name"></span>
+                                    <span class="text-blue-700" x-text="sac.contact"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <button @click="saveProfile()" :disabled="loading || uidLoading || !profile.uid || !profile.name || !profile.primaryMobile"
+                        class="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                    <span x-show="!loading && !uidLoading">Save & Continue</span>
+                    <span x-show="loading || uidLoading" class="flex items-center gap-2">
+                        <span x-text="uidLoading ? 'Processing...' : 'Saving...'"></span>
+                        <span class="animate-spin border-2 border-white border-t-transparent rounded-full w-5 h-5"></span>
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 4. Dashboard (Connection List) -->
+        <div x-show="step === 'dashboard'" x-cloak class="space-y-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <button @click="step = 'profile'" class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 hover:bg-blue-200 transition-colors">
+                        <i data-lucide="user" class="w-5 h-5"></i>
+                    </button>
+                    <div>
+                        <h2 class="text-xl font-bold">My Connections</h2>
+                        <p class="text-gray-500 text-sm" x-text="requests.length + ' Connection(s)'"></p>
+                    </div>
+                </div>
+                <button @click="openForm()" class="bg-blue-600 text-white p-3 rounded-xl shadow-lg shadow-blue-200">
+                    <i data-lucide="plus" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <template x-if="requestsLoading">
+                <div class="flex flex-col items-center justify-center py-20 space-y-4">
+                    <div class="animate-spin border-4 border-blue-600 border-t-transparent rounded-full w-12 h-12"></div>
+                    <p class="text-gray-500 font-medium">Loading your requests...</p>
+                </div>
+            </template>
+
+            <template x-if="!requestsLoading && requests.length === 0">
+                <div class="bg-white p-12 rounded-2xl border border-dashed border-gray-300 text-center space-y-4">
+                    <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-400">
+                        <i data-lucide="smartphone" class="w-8 h-8"></i>
+                    </div>
+                    <p class="text-gray-500">No connection requests yet.<br>Click the + button to add one.</p>
+                </div>
+            </template>
+
+                <div x-show="!requestsLoading && requests.length > 0" class="space-y-4">
+                <template x-for="req in requests" :key="req.requestId">
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border space-y-4">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" 
+                                          :class="req.requestType === 'NEW' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'"
+                                          x-text="req.requestType || 'SHIFT'"></span>
+                                    <div class="text-lg font-bold text-gray-900" x-text="req.requestType === 'NEW' ? 'New Connection' : formatMobile(req.existingMobile)"></div>
+                                </div>
+                                <div class="text-xs text-gray-500 uppercase font-bold tracking-widest" x-text="(req.requestType === 'NEW' ? '' : req.existingOperator + ' → ') + req.newOperator"></div>
+                            </div>
+                            <span :class="{
+                                'bg-blue-100 text-blue-700': req.status === 'Applied',
+                                'bg-green-100 text-green-700': req.status === 'Processed' || req.status === 'Sim Delivered',
+                                'bg-yellow-100 text-yellow-700': req.status === 'Pending'
+                            }" class="px-3 py-1 rounded-full text-xs font-bold" x-text="req.status"></span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-400 block text-[10px] uppercase font-bold">Aadhaar Name</span>
+                                <span class="font-medium" x-text="req.aadhaarName"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400 block text-[10px] uppercase font-bold">Billing Centre</span>
+                                <span class="font-medium" x-text="req.billingName"></span>
+                            </div>
+                        </div>
+                        <div x-show="req.simNumber" class="bg-gray-50 p-3 rounded-xl border border-gray-100 flex items-center justify-between">
+                            <div>
+                                <span class="text-gray-400 block text-[10px] uppercase font-bold">SIM Number</span>
+                                <span class="font-mono font-bold text-blue-600" x-text="req.simNumber"></span>
+                            </div>
+                            <i data-lucide="credit-card" class="w-5 h-5 text-blue-200"></i>
+                        </div>
+                        <div class="pt-4 border-t flex justify-between items-center">
+                            <span class="text-xs text-gray-400" x-text="'Updated: ' + formatDate(req.updatedAt)"></span>
+                            <div class="flex items-center gap-3">
+                                <template x-if="req.status === 'Applied' || req.status === 'Pending'">
+                                    <button @click="deleteRequest(req.requestId)" :disabled="loading" class="text-red-600 font-bold text-sm flex items-center gap-1 disabled:opacity-50">
+                                        <template x-if="!loading || currentRequest.requestId !== req.requestId">
+                                            <span class="flex items-center gap-1"><i data-lucide="trash-2" class="w-4 h-4"></i> Delete</span>
+                                        </template>
+                                        <template x-if="loading && currentRequest.requestId === req.requestId">
+                                            <div class="animate-spin border-2 border-red-600 border-t-transparent rounded-full w-4 h-4"></div>
+                                        </template>
+                                    </button>
+                                </template>
+                                <template x-if="req.status !== 'Sim Delivered'">
+                                    <button @click="editRequest(req)" class="text-blue-600 font-bold text-sm flex items-center gap-1">
+                                        <i data-lucide="edit-3" class="w-4 h-4"></i> Edit
+                                    </button>
+                                </template>
+                                <template x-if="req.status === 'Sim Delivered'">
+                                    <button @click="viewRequest(req)" class="text-gray-400 font-bold text-sm flex items-center gap-1">
+                                        <i data-lucide="eye" class="w-4 h-4"></i> View
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- 5. Add/Edit Form -->
+        <div x-show="step === 'form'" x-cloak class="space-y-6 py-4">
+            <div class="flex items-center gap-3">
+                <button @click="step = 'dashboard'" class="p-2 hover:bg-gray-100 rounded-lg">
+                    <i data-lucide="arrow-left" class="w-6 h-6"></i>
+                </button>
+                <h2 class="text-xl font-bold" x-text="viewMode ? 'View Details' : (currentRequest.requestId ? 'Edit Connection' : 'New Connection')"></h2>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border space-y-5">
+                <!-- Request Type -->
+                <div class="space-y-3">
+                    <label class="block text-sm font-medium text-gray-700">Request Type <span class="text-red-500">*</span></label>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label class="relative flex items-center p-4 border rounded-xl cursor-pointer hover:bg-gray-50 transition-all" :class="currentRequest.requestType === 'NEW' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                            <input type="radio" name="reqType" value="NEW" x-model="currentRequest.requestType" @change="handleTypeChange()" class="hidden" :disabled="viewMode">
+                            <div class="flex-1">
+                                <div class="font-bold text-sm">New Connection</div>
+                                <div class="text-xs text-gray-500">Fresh mobile number</div>
+                            </div>
+                            <div x-show="currentRequest.requestType === 'NEW'" class="text-blue-600"><i data-lucide="check-circle-2" class="w-5 h-5"></i></div>
+                        </label>
+                        <label class="relative flex items-center p-4 border rounded-xl cursor-pointer hover:bg-gray-50 transition-all" :class="currentRequest.requestType === 'SHIFT' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                            <input type="radio" name="reqType" value="SHIFT" x-model="currentRequest.requestType" @change="handleTypeChange()" class="hidden" :disabled="viewMode">
+                            <div class="flex-1">
+                                <div class="font-bold text-sm">Shift Number</div>
+                                <div class="text-xs text-gray-500">Port existing number</div>
+                            </div>
+                            <div x-show="currentRequest.requestType === 'SHIFT'" class="text-blue-600"><i data-lucide="check-circle-2" class="w-5 h-5"></i></div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="space-y-5">
+                    <!-- Mobile No -->
+                    <div :class="currentRequest.requestType === 'NEW' ? 'opacity-50' : ''">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            Existing Mobile Number 
+                            <span x-show="currentRequest.requestType === 'SHIFT'" class="text-red-500">*</span>
+                        </label>
+                        <div class="relative">
+                            <input type="tel" x-model="currentRequest.existingMobile" maxlength="10" 
+                                   :placeholder="currentRequest.requestType === 'NEW' ? 'New number will be assigned' : '10 digit number'" 
+                                   autocomplete="off"
+                                   @input="currentRequest.existingMobile = $event.target.value.replace(/\D/g, '')"
+                                   @keydown.enter="saveRequest()" :disabled="viewMode || currentRequest.requestType === 'NEW'"
+                                   class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-500">
+                            <div x-show="currentRequest.requestType === 'NEW'" class="absolute right-4 top-1/2 -translate-y-1/2">
+                                <i data-lucide="lock" class="w-4 h-4 text-gray-400"></i>
+                            </div>
+                        </div>
+                        <div x-show="currentRequest.requestType === 'SHIFT' && !currentRequest.requestId" class="mt-1 text-[10px] text-gray-500 italic">
+                            Only one request allowed per mobile number. To edit existing, use the Dashboard.
+                        </div>
+                    </div>
+
+                    <!-- Operators -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div :class="currentRequest.requestType === 'NEW' ? 'opacity-50' : ''">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Current Operator 
+                                <span x-show="currentRequest.requestType === 'SHIFT'" class="text-red-500">*</span>
+                            </label>
+                            <select x-model="currentRequest.existingOperator" :disabled="viewMode || currentRequest.requestType === 'NEW'" class="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-white focus:ring-2 focus:ring-blue-500 transition-all disabled:bg-gray-100 disabled:text-gray-500">
+                                <option value="">Select</option>
+                                <option value="Airtel">Airtel</option>
+                                <option value="Jio">Jio</option>
+                                <option value="VI">VI</option>
+                                <option value="BSNL">BSNL</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">New Operator <span class="text-red-500">*</span></label>
+                            <select x-model="currentRequest.newOperator" :disabled="viewMode" class="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-white focus:ring-2 focus:ring-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500">
+                                <option value="">Select</option>
+                                <option value="Airtel">Airtel</option>
+                                <option value="Jio">Jio</option>
+                                <option value="VI">VI</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Aadhaar -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Aadhaar Number <span class="text-red-500">*</span></label>
+                        <input type="text" x-model="aadhaarDisplay" @input="formatAadhaar($event)" maxlength="14" placeholder="XXXX XXXX XXXX" autocomplete="off"
+                               @keydown.enter="saveRequest()" :disabled="viewMode"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none font-mono tracking-widest disabled:bg-gray-50 disabled:text-gray-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Name as per Aadhaar <span class="text-red-500">*</span></label>
+                        <input type="text" x-model="currentRequest.aadhaarName" placeholder="Full Name" autocomplete="off"
+                               @keydown.enter="saveRequest()" :disabled="viewMode"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Date of Birth <span class="text-red-500">*</span></label>
+                        <input type="date" x-model="currentRequest.dob" :disabled="viewMode"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500">
+                    </div>
+
+                    <!-- Billing UID -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Billing Centre UID <span class="text-red-500">*</span></label>
+                        <div class="relative" x-data="{ open: false, search: '' }">
+                            <div class="relative">
+                                <input type="text" x-model="currentRequest.billingUid" 
+                                       @focus="if(!viewMode) open = true; search = currentRequest.billingUid" 
+                                       @input="open = true; search = currentRequest.billingUid" 
+                                       @click.away="open = false"
+                                       placeholder="Search or Enter UID" autocomplete="off" :disabled="viewMode"
+                                       class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none pr-10 disabled:bg-gray-50 disabled:text-gray-500">
+                                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                                    <i data-lucide="chevron-down" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div x-show="open" class="absolute z-50 w-full mt-1 bg-white border rounded-xl shadow-xl max-h-60 overflow-y-auto">
+                                <div x-show="uids.length === 0" class="px-4 py-3 text-center">
+                                    <p class="text-xs text-red-500 mb-2">Failed to load UIDs</p>
+                                    <button @click.stop="fetchUids()" class="text-xs font-bold text-blue-600 hover:underline">Retry Loading</button>
+                                </div>
+                                <template x-for="u in (uids || []).filter(i => (i.uid || '').toLowerCase().includes((search || '').toLowerCase()) || (i.unitName || '').toLowerCase().includes((search || '').toLowerCase()))">
+                                    <div @click="currentRequest.billingUid = u.uid; currentRequest.billingName = u.unitName; open = false; search = u.uid" 
+                                         class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b last:border-0">
+                                        <div class="font-bold text-sm" x-text="u.uid"></div>
+                                        <div class="text-xs text-gray-500" x-text="u.unitName"></div>
+                                    </div>
+                                </template>
+                                <div x-show="(uids || []).filter(i => (i.uid || '').toLowerCase().includes((search || '').toLowerCase()) || (i.unitName || '').toLowerCase().includes((search || '').toLowerCase())).length === 0" 
+                                     class="px-4 py-3 text-sm text-gray-500 italic">
+                                    No matching UIDs found
+                                </div>
+                            </div>
+                        </div>
+                        <template x-if="currentRequest.billingName">
+                            <div class="mt-2 text-xs font-bold text-blue-600 uppercase" x-text="currentRequest.billingName"></div>
+                        </template>
+                    </div>
+
+                    <!-- Pincode -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Pincode <span class="text-red-500">*</span></label>
+                        <input type="tel" x-model="currentRequest.pincode" maxlength="6" placeholder="6 digit pincode" autocomplete="off"
+                               @input="currentRequest.pincode = $event.target.value.replace(/\D/g, '')"
+                               @keydown.enter="saveRequest()" :disabled="viewMode"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500">
+                    </div>
+
+                    <!-- Expiry Date -->
+                    <div :class="currentRequest.requestType === 'NEW' ? 'opacity-50' : ''">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            Current Plan Expiry Date 
+                            <span x-show="currentRequest.requestType === 'SHIFT'" class="text-red-500">*</span>
+                        </label>
+                        <input type="date" x-model="currentRequest.expiryDate" @change="checkExpiry()" :disabled="viewMode || currentRequest.requestType === 'NEW'"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-500">
+                        
+                        <!-- Help Tip -->
+                        <div x-show="currentRequest.requestType === 'SHIFT'" class="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-100 flex items-start gap-2">
+                            <i data-lucide="info" class="w-4 h-4 text-blue-600 mt-0.5"></i>
+                            <div class="text-[11px] text-blue-700 leading-relaxed">
+                                <span class="font-bold">To know the Expiry Date:</span><br>
+                                Dial <span class="font-bold">1299</span> (Jio), <span class="font-bold">*123#</span> (Airtel & BSNL), <span class="font-bold">*199#</span> (VI)
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2nd Number -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">2nd Number for OTP <span class="text-red-500">*</span></label>
+                        <input type="tel" x-model="currentRequest.secondaryOtpMobile" maxlength="10" placeholder="10 digit mobile" autocomplete="off"
+                               @input="currentRequest.secondaryOtpMobile = $event.target.value.replace(/\D/g, ''); checkSecondaryMobile()"
+                               @keydown.enter="saveRequest()" :disabled="viewMode"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-500">
+                    </div>
+
+                    <button x-show="!viewMode" @click="saveRequest()" :disabled="loading"
+                            class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                        <span x-show="!loading">Save Connection Request</span>
+                        <span x-show="loading" class="flex items-center gap-2">
+                            <span>Processing...</span>
+                            <span class="animate-spin border-2 border-white border-t-transparent rounded-full w-5 h-5"></span>
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. Profile View -->
+        <div x-show="step === 'profile'" x-cloak class="space-y-6 py-8">
+            <div class="flex items-center gap-4">
+                <button @click="step = 'dashboard'" class="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <i data-lucide="arrow-left" class="w-6 h-6"></i>
+                </button>
+                <h2 class="text-2xl font-bold">My Profile</h2>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border space-y-6">
+                <div class="flex items-center gap-4 pb-6 border-b">
+                    <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white text-2xl font-bold" x-text="profile.name ? profile.name[0] : 'U'"></div>
+                    <div>
+                        <div class="text-xl font-bold text-gray-900" x-text="profile.name || 'User'"></div>
+                        <div class="text-sm text-gray-500" x-text="profile.email"></div>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500">
+                            <i data-lucide="smartphone" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase font-bold tracking-wider">Mobile Number</div>
+                            <div class="font-semibold" x-text="profile.primaryMobile"></div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500">
+                            <i data-lucide="hash" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 uppercase font-bold tracking-wider">Unit UID</div>
+                            <div class="font-semibold" x-text="profile.uid"></div>
+                        </div>
+                    </div>
+
+                    <div x-show="uidLoading" class="bg-blue-50/50 p-6 rounded-xl border border-dashed border-blue-200 flex flex-col items-center justify-center gap-3">
+                        <div class="animate-spin border-2 border-blue-600 border-t-transparent rounded-full w-6 h-6"></div>
+                        <p class="text-xs text-blue-600 font-bold uppercase tracking-widest">Updating Details...</p>
+                    </div>
+
+                    <template x-if="uidDetails && !uidLoading">
+                        <div class="bg-blue-50 p-4 rounded-xl space-y-3 border border-blue-100 mt-4">
+                            <div class="flex justify-between text-xs text-blue-600 font-bold uppercase tracking-wider">
+                                <span>Zone: <span class="text-blue-900" x-text="uidDetails.zone"></span></span>
+                                <span>Sub-Zone: <span class="text-blue-900" x-text="uidDetails.subZone"></span></span>
+                            </div>
+                            
+                            <div class="pt-2 border-t border-blue-200">
+                                <span class="text-xs text-blue-600 font-bold uppercase tracking-wider">Unit Name</span>
+                                <div class="text-sm font-semibold text-blue-900" x-text="uidDetails.unitName"></div>
+                            </div>
+
+                            <!-- ZAC Info -->
+                            <div class="pt-2 border-t border-blue-200" x-show="uidDetails.zacs && uidDetails.zacs.length > 0">
+                                <span class="text-xs text-blue-600 font-bold uppercase tracking-wider">Zone Coordinators (ZAC)</span>
+                                <template x-for="zac in uidDetails.zacs">
+                                    <div class="flex justify-between text-sm mt-1">
+                                        <span class="font-semibold text-blue-900" x-text="zac.name"></span>
+                                        <span class="text-blue-700" x-text="zac.contact"></span>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <!-- SAC Info -->
+                            <div class="pt-2 border-t border-blue-200" x-show="uidDetails.sacs && uidDetails.sacs.length > 0">
+                                <span class="text-xs text-blue-600 font-bold uppercase tracking-wider">Sub-Zone Coordinators (SAC)</span>
+                                <template x-for="sac in uidDetails.sacs">
+                                    <div class="flex justify-between text-sm mt-1">
+                                        <span class="font-semibold text-blue-900" x-text="sac.name"></span>
+                                        <span class="text-blue-700" x-text="sac.contact"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <template x-if="profile.telegramId">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-500">
+                                <i data-lucide="send" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-500 uppercase font-bold tracking-wider">Telegram Linked</div>
+                                <div class="font-semibold text-blue-600">Connected</div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <button @click="step = 'setup'" class="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-200 transition-all flex items-center justify-center gap-2">
+                    <i data-lucide="edit" class="w-4 h-4"></i>
+                    Edit Profile
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Age Confirmation Modal -->
+    <div x-show="showAgeConfirm" x-cloak class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <div class="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600 mx-auto">
+                <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+            </div>
+            <div class="text-center space-y-2">
+                <h3 class="text-lg font-bold">Age Confirmation</h3>
+                <p class="text-sm text-gray-500">The Date of Birth entered indicates the applicant is under 18 years old. Do you confirm this is correct?</p>
+            </div>
+            <div class="flex gap-3">
+                <button @click="showAgeConfirm = false" class="flex-1 px-4 py-2 border rounded-xl font-medium hover:bg-gray-50">No, Edit</button>
+                <button @click="confirmSaveUnder18()" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700">Yes, Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Connection Confirmation Modal -->
+    <div x-show="showNewConnectionModal" x-cloak
+         class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" @click.away="showNewConnectionModal = false">
+            <div class="p-6 border-b flex items-center justify-between bg-purple-600 text-white">
+                <h3 class="text-lg font-bold">New Connection Info</h3>
+                <button @click="showNewConnectionModal = false" class="hover:bg-white/20 p-1 rounded-lg transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                    <p class="text-sm text-purple-900 leading-relaxed font-medium">
+                        अगर आपके पास पहले से कोई नंबर हैं, और उसी को ही postpaid करना है तो existing number वाले दूसरे विकल्प में जायें। यह विकल्प केवल नया नंबर लेने के लिए हैं।
+                    </p>
+                </div>
+                <button @click="showNewConnectionModal = false" 
+                        class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-purple-200 hover:bg-purple-700 transition-all">
+                    I Understand
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Persistent Error Modal -->
+    <div x-show="showPersistentAlert" x-cloak class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 mx-auto">
+                <i data-lucide="alert-circle" class="w-6 h-6"></i>
+            </div>
+            <div class="text-center space-y-2">
+                <h3 class="text-lg font-bold">Registration Alert</h3>
+                <p class="text-sm text-gray-500 leading-relaxed font-medium" x-text="persistentAlertMsg"></p>
+            </div>
+            <button @click="showPersistentAlert = false" class="w-full px-4 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all">OK, Understood</button>
+        </div>
+    </div>
+
+    <!-- Global Toasts -->
+    <div class="fixed bottom-6 left-4 right-4 z-50 flex flex-col gap-3">
+        <template x-for="t in toasts" :key="t.id">
+            <div x-cloak x-transition
+                 class="p-4 rounded-xl shadow-2xl flex items-center gap-3 border"
+                 :class="t.type === 'error' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-green-50 border-green-100 text-green-800'">
+                <i :data-lucide="t.type === 'error' ? 'alert-circle' : 'check-circle'" class="w-5 h-5"></i>
+                <span class="flex-1 text-sm font-medium" x-text="t.message"></span>
+                <button @click="toasts = toasts.filter(item => item.id !== t.id)" class="p-1 hover:bg-black/5 rounded-full">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </template>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // Replace this with your actual Google Apps Script Web App URL
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbymDBdvvSP3qZCyJym2EzcnlMtznYTYiZKFAOYp1lHbsyH3i38QudtKF8xzA0ZBTM6v/exec";
+
+        function portalApp() {
+            return {
+                step: 'login',
+                loading: false,
+                isLoggedIn: false,
+                loginMethod: 'EMAIL',
+                email: '',
+                otpArray: ['', '', '', '', '', ''],
+                resendTimer: 0,
+                canResend: false,
+                resendInterval: null,
+                profile: { email: '', uid: '', name: '', primaryMobile: '', telegramId: '', isAdmin: false },
+                uids: [],
+                uidDetails: null,
+                uidLoading: false,
+                lastUidFetched: null,
+                requests: [],
+                requestsLoading: false,
+                currentRequest: {},
+                viewMode: false,
+                aadhaarDisplay: '',
+                billingLoading: false,
+                toasts: [],
+                showAgeConfirm: false,
+                ageConfirmed: false,
+                showNewConnectionModal: false,
+                showPersistentAlert: false,
+                persistentAlertMsg: '',
+
+                init() {
+                    lucide.createIcons();
+                    this.fetchUids();
+                    // Check for saved session
+                    const savedEmail = localStorage.getItem('portal_email');
+                    if (savedEmail) {
+                        this.email = savedEmail;
+                        this.fetchProfile();
+                    }
+                    
+                    // Watch loginMethod to inject Telegram Widget
+                    this.$watch('loginMethod', (val) => {
+                        if (val === 'TELEGRAM') {
+                            this.injectTelegramWidget();
+                        }
+                    });
+                },
+
+                injectTelegramWidget() {
+                    this.$nextTick(() => {
+                        const container = document.getElementById('telegram-login-container');
+                        if (container && !container.innerHTML) {
+                            const script = document.createElement('script');
+                            script.src = "https://telegram.org/js/telegram-widget.js?22";
+                            script.setAttribute('data-telegram-login', 'BKIVV_Bot'); // Replace with your bot username
+                            script.setAttribute('data-size', 'large');
+                            script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+                            script.setAttribute('data-request-access', 'write');
+                            container.appendChild(script);
+                            
+                            window.onTelegramAuth = (user) => {
+                                this.handleTelegramLogin(user);
+                            };
+                        }
+                    });
+                },
+
+                async handleTelegramLogin(user) {
+                    const res = await this.callApi('mobilePlan_verifyTelegramWidget', { authData: user });
+                    if (res && res.success) {
+                        if (res.linked && res.profile) {
+                            this.email = res.profile.email;
+                            this.profile = res.profile;
+                            this.isLoggedIn = true;
+                            localStorage.setItem('portal_email', this.email);
+                            this.fetchRequests();
+                            this.step = 'dashboard';
+                        } else {
+                            this.showToast('Telegram account verified. Please login with Email first to link your account.', 'success');
+                        }
+                    }
+                },
+
+                showToast(message, type = 'success') {
+                    // Specific check for Duplicate Mobile errors to make them persistent
+                    if (message.includes('DUPLICATE_OWN') || message.includes('DUPLICATE_OTHER') || message.includes('Duplicate Mobile')) {
+                        this.persistentAlertMsg = message.replace('DUPLICATE_OWN: ', '').replace('DUPLICATE_OTHER: ', '');
+                        this.showPersistentAlert = true;
+                        this.$nextTick(() => lucide.createIcons());
+                        return;
+                    }
+
+                    const id = Date.now() + Math.random();
+                    this.toasts.push({ id, message, type });
+                    this.$nextTick(() => lucide.createIcons());
+                    setTimeout(() => {
+                        this.toasts = this.toasts.filter(t => t.id !== id);
+                    }, 5000);
+                },
+
+                async callApi(action, data = {}) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(GAS_URL, {
+                            method: 'POST',
+                            body: JSON.stringify({ action, ...data })
+                        });
+                        const result = await response.json();
+                        if (result.error) throw new Error(result.error);
+                        return result;
+                    } catch (e) {
+                        this.showToast(e.message, 'error');
+                        return null;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async requestOtp(method = 'AUTO') {
+                    this.email = String(this.email || '').toLowerCase().trim();
+                    if (!this.email.includes('@bkivv.org')) {
+                        return this.showToast('Please use a @bkivv.org email', 'error');
+                    }
+
+                    if (method === 'AUTO') {
+                        this.loading = true;
+                        try {
+                            // Try Telegram first silently
+                            const response = await fetch(GAS_URL, {
+                                method: 'POST',
+                                body: JSON.stringify({ action: 'mobilePlan_requestOtp', email: this.email, method: 'TELEGRAM' })
+                            });
+                            const result = await response.json();
+                            
+                            if (result && !result.error) {
+                                this.loginMethod = 'TELEGRAM';
+                                this.step = 'otp';
+                                this.startResendTimer();
+                                this.showToast('OTP sent via Telegram', 'success');
+                                return;
+                            }
+                            
+                            // If Telegram fails, fallback to Email
+                            const emailRes = await this.callApi('mobilePlan_requestOtp', { email: this.email, method: 'EMAIL' });
+                            if (emailRes) {
+                                this.loginMethod = 'EMAIL';
+                                this.step = 'otp';
+                                this.startResendTimer();
+                                this.showToast('OTP sent via Email', 'success');
+                            }
+                        } catch (e) {
+                            // Fallback to email on any unexpected error
+                            const emailRes = await this.callApi('mobilePlan_requestOtp', { email: this.email, method: 'EMAIL' });
+                            if (emailRes) {
+                                this.loginMethod = 'EMAIL';
+                                this.step = 'otp';
+                                this.startResendTimer();
+                            }
+                        } finally {
+                            this.loading = false;
+                        }
+                    } else {
+                        const res = await this.callApi('mobilePlan_requestOtp', { email: this.email, method: method });
+                        if (res) {
+                            this.loginMethod = method;
+                            this.step = 'otp';
+                            this.startResendTimer();
+                        }
+                    }
+                },
+
+                startResendTimer() {
+                    this.resendTimer = 90;
+                    this.canResend = false;
+                    if (this.resendInterval) clearInterval(this.resendInterval);
+                    this.resendInterval = setInterval(() => {
+                        if (this.resendTimer > 0) {
+                            this.resendTimer--;
+                        } else {
+                            this.canResend = true;
+                            clearInterval(this.resendInterval);
+                        }
+                    }, 1000);
+                },
+
+                async resendOtp(method) {
+                    if (!this.canResend) return;
+                    await this.requestOtp(method);
+                    this.showToast('OTP resent successfully');
+                },
+
+                handleOtpInput(e, index) {
+                    const val = e.target.value;
+                    if (val && index < 5) document.getElementById('otp-' + (index + 1)).focus();
+                },
+
+                handleOtpBackspace(e, index) {
+                    if (!this.otpArray[index] && index > 0) document.getElementById('otp-' + (index - 1)).focus();
+                },
+
+                async verifyOtp() {
+                    const otp = this.otpArray.join('');
+                    const res = await this.callApi('mobilePlan_verifyOtp', { email: this.email, otp });
+                    console.log("OTP Verification Result:", res);
+                        if (res) {
+                        this.isLoggedIn = true;
+                        localStorage.setItem('portal_email', this.email);
+                        if (res.profile) {
+                            this.profile = res.profile;
+                            console.log("Logged in Profile:", this.profile);
+                            
+                            if (this.profile.isAdmin) {
+                                this.showToast('Admin verified. Choose destination.', 'success');
+                                // Admins stay on OTP screen for destination choice
+                            } else if (this.profile.uid && this.profile.name) {
+                                // Complete profile -> Dashboard
+                                this.lookupUid(this.profile.uid);
+                                this.fetchRequests();
+                                this.step = 'dashboard';
+                            } else {
+                                // Orphaned or New user -> Setup
+                                this.profile.email = this.email;
+                                this.step = 'setup';
+                                this.showToast('Please complete your one-time profile setup.', 'info');
+                            }
+                        } else {
+                            this.profile.email = this.email;
+                            this.step = 'setup';
+                        }
+                        setTimeout(() => lucide.createIcons(), 100);
+                    }
+                },
+
+                async fetchProfile() {
+                    const res = await fetch(GAS_URL + '?action=mobilePlan_getProfile&email=' + this.email);
+                    const result = await res.json();
+                    console.log("Profile Fetch Result:", result);
+                    if (result && !result.error && typeof result === 'object' && !Array.isArray(result)) {
+                        this.profile = result;
+                        this.isLoggedIn = true;
+                        this.lookupUid(this.profile.uid);
+                        this.fetchRequests();
+                        this.step = 'dashboard';
+                    }
+                },
+
+                async fetchUids() {
+                    try {
+                        const res = await fetch(GAS_URL + '?action=mobilePlan_getUids');
+                        const result = await res.json();
+                        
+                        let rawData = [];
+                        if (Array.isArray(result)) {
+                            rawData = result;
+                        } else if (result && Array.isArray(result.data)) {
+                            rawData = result.data;
+                        } else if (result && typeof result === 'object') {
+                            const firstArray = Object.values(result).find(val => Array.isArray(val));
+                            if (firstArray) rawData = firstArray;
+                        }
+
+                        // Filter for PBKIVV institute UIDs
+                        // The backend now returns standard keys: uid, unitName, zone, subZone, institute
+                        this.uids = rawData.filter(u => {
+                            const inst = u.institute;
+                            return inst && inst.toString().trim().toUpperCase() === 'PBKIVV';
+                        });
+                        
+                        if (this.uids.length === 0 && rawData.length > 0) {
+                            console.warn('UID filter returned 0 results. Check if "institute" column contains "PBKIVV"');
+                        }
+                    } catch (e) {
+                        console.error('Error fetching UIDs:', e);
+                        this.uids = [];
+                    }
+                },
+
+                async lookupUid(uid) {
+                    if (!uid) {
+                        this.uidDetails = null;
+                        this.lastUidFetched = null;
+                        return;
+                    }
+                    
+                    this.lastUidFetched = uid;
+                    this.uidLoading = true;
+                    
+                    try {
+                        const res = await fetch(GAS_URL + '?action=mobilePlan_getUidDetails&uid=' + uid);
+                        const result = await res.json();
+                        
+                        // Race condition check: Only update if this is still the UID we want
+                        if (this.lastUidFetched === uid) {
+                            if (result && !result.error) {
+                                this.uidDetails = result;
+                            } else {
+                                this.uidDetails = null;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Lookup error:', e);
+                        if (this.lastUidFetched === uid) this.uidDetails = null;
+                    } finally {
+                        if (this.lastUidFetched === uid) {
+                            this.uidLoading = false;
+                        }
+                    }
+                },
+
+                async saveProfile() {
+                    if (!this.profile.name || !this.profile.primaryMobile || !this.profile.uid) {
+                        return this.showToast('All fields are mandatory', 'error');
+                    }
+
+                    // UID Validation - Must be from the list
+                    const validUid = this.uids.find(u => u.uid === this.profile.uid);
+                    if (!validUid) {
+                        return this.showToast('Please select a valid Unit UID from the dropdown list.', 'error');
+                    }
+                    
+                    // Indian Mobile Validation
+                    const mobileRegex = /^[6-9]\d{9}$/;
+                    if (!mobileRegex.test(this.profile.primaryMobile)) {
+                        return this.showToast('Please enter a valid 10-digit Indian mobile number', 'error');
+                    }
+
+                    const res = await this.callApi('mobilePlan_saveProfile', { profileData: this.profile });
+                    if (res) {
+                        this.showToast('Profile linked successfully!');
+                        this.step = 'dashboard';
+                        this.fetchRequests();
+                    }
+                },
+
+                async fetchRequests() {
+                    this.requestsLoading = true;
+                    try {
+                        const res = await fetch(GAS_URL + '?action=mobilePlan_getRequests&email=' + this.email);
+                        const data = await res.json();
+                        const rawData = Array.isArray(data) ? data : [];
+                        this.requests = rawData.map(r => ({
+                            ...r,
+                            requestType: String(r.requestType || '').trim().toUpperCase(),
+                            existingOperator: String(r.existingOperator || '').trim().toUpperCase(),
+                            newOperator: String(r.newOperator || '').trim().toUpperCase()
+                        }));
+                    } catch (e) {
+                        this.requests = [];
+                    } finally {
+                        this.requestsLoading = false;
+                    }
+                    setTimeout(() => lucide.createIcons(), 100);
+                },
+
+                openForm() {
+                    this.viewMode = false;
+                    this.currentRequest = {
+                        email: this.email,
+                        requestType: 'SHIFT',
+                        billingUid: this.profile.uid,
+                        billingName: '',
+                        existingOperator: '',
+                        newOperator: '',
+                        status: 'Applied'
+                    };
+                    
+                    // Auto-fill billing name from uids list
+                    if (Array.isArray(this.uids)) {
+                        const found = this.uids.find(u => u.uid === this.profile.uid);
+                        if (found) this.currentRequest.billingName = found.unitName;
+                    }
+
+                    this.aadhaarDisplay = '';
+                    this.step = 'form';
+                    setTimeout(() => lucide.createIcons(), 100);
+                },
+
+                editRequest(req) {
+                    this.viewMode = false;
+                    this.currentRequest = { ...req };
+                    if (!this.currentRequest.requestType) this.currentRequest.requestType = 'SHIFT';
+                    this.aadhaarDisplay = this.formatAadhaarString(req.aadhaarNo);
+                    this.step = 'form';
+                    setTimeout(() => lucide.createIcons(), 100);
+                },
+
+                viewRequest(req) {
+                    this.editRequest(req);
+                    this.viewMode = true;
+                },
+
+                async deleteRequest(requestId) {
+                    if (!confirm('Are you sure you want to delete this request?')) return;
+                    this.currentRequest.requestId = requestId; // Track which one is being deleted
+                    const res = await this.callApi('mobilePlan_deleteRequest', { requestId, email: this.email });
+                    if (res) {
+                        this.showToast('Request deleted successfully');
+                        this.fetchRequests();
+                    }
+                    this.currentRequest.requestId = null;
+                },
+
+                formatAadhaar(e) {
+                    let val = e.target.value.replace(/\s/g, '').replace(/\D/g, '');
+                    this.currentRequest.aadhaarNo = val;
+                    this.aadhaarDisplay = this.formatAadhaarString(val);
+                },
+
+                formatAadhaarString(val) {
+                    if (!val) return '';
+                    const str = String(val);
+                    const parts = str.match(/.{1,4}/g);
+                    return parts ? parts.join(' ') : str;
+                },
+
+                async lookupBillingUid() {
+                    // Deprecated in favor of searchable dropdown
+                },
+
+                checkExpiry() {
+                    const today = new Date().toISOString().split('T')[0];
+                    if (this.currentRequest.expiryDate < today) {
+                        this.showToast('The date entered has already expired. Please confirm.', 'error');
+                    }
+                },
+
+                checkSecondaryMobile() {
+                    if (this.currentRequest.secondaryOtpMobile === this.currentRequest.existingMobile && this.currentRequest.existingMobile.length === 10) {
+                        this.showToast('This is the same as the connection number.', 'success');
+                    }
+                },
+
+                handleTypeChange() {
+                    if (this.currentRequest.requestType === 'NEW') {
+                        // Clear non-applicable fields for NEW connection
+                        this.currentRequest.existingMobile = '';
+                        this.currentRequest.existingOperator = '';
+                        this.currentRequest.expiryDate = '';
+                        this.showNewConnectionModal = true;
+                        this.showToast('Switched to New Connection. Porting details cleared.', 'info');
+                    }
+                    setTimeout(() => lucide.createIcons(), 100);
+                },
+
+                async saveRequest() {
+                    // Safety Guard: Ensure profile exists
+                    if (!this.profile || !this.profile.uid || !this.profile.name) {
+                        this.showToast('Profile data missing. Redirecting to setup...', 'error');
+                        this.step = 'setup';
+                        return;
+                    }
+
+                    // Mandatory Fields Check
+                    const required = [
+                        'newOperator', 'aadhaarNo', 'aadhaarName', 'dob', 
+                        'billingUid', 'billingName', 'pincode', 'secondaryOtpMobile'
+                    ];
+
+                    // Type-specific mandatory fields
+                    if (this.currentRequest.requestType === 'SHIFT') {
+                        required.push('existingMobile', 'existingOperator', 'expiryDate');
+                    }
+                    
+                    for (const field of required) {
+                        if (!this.currentRequest[field]) {
+                            return this.showToast('All fields marked with * are mandatory', 'error');
+                        }
+                    }
+
+                    // UID Validation - Must be from the list
+                    const validBillingUid = this.uids.find(u => u.uid === this.currentRequest.billingUid);
+                    if (!validBillingUid) {
+                        return this.showToast('Please select a valid Billing UID from the dropdown list.', 'error');
+                    }
+
+                    // Ensure billing name is populated
+                    if (!this.currentRequest.billingName) {
+                        this.currentRequest.billingName = validBillingUid.unitName;
+                    }
+
+                    const mobileRegex = /^[6-9]\d{9}$/;
+                    if (this.currentRequest.requestType === 'SHIFT') {
+                        if (!mobileRegex.test(this.currentRequest.existingMobile)) {
+                            return this.showToast('Invalid Existing Mobile Number', 'error');
+                        }
+                    }
+                    if (!mobileRegex.test(this.currentRequest.secondaryOtpMobile)) {
+                        return this.showToast('Invalid Secondary OTP Mobile Number', 'error');
+                    }
+                    if (!/^\d{12}$/.test(this.currentRequest.aadhaarNo)) {
+                        return this.showToast('Invalid Aadhaar Number (must be 12 digits)', 'error');
+                    }
+                    if (!/^\d{6}$/.test(this.currentRequest.pincode)) {
+                        return this.showToast('Invalid Pincode (must be 6 digits)', 'error');
+                    }
+
+                    // Age Validation
+                    const age = this.calculateAge(this.currentRequest.dob);
+                    if (age < 0) {
+                        return this.showToast('Date of Birth cannot be in the future', 'error');
+                    }
+                    if (age < 18 && !this.ageConfirmed) {
+                        this.showAgeConfirm = true;
+                        return;
+                    }
+
+                    // Duplicate Check (Local Pre-validation)
+                    if (this.currentRequest.requestType === 'SHIFT') {
+                        const localDuplicate = this.requests.find(r => 
+                            String(r.existingMobile).trim() === String(this.currentRequest.existingMobile).trim() && 
+                            (String(r.requestType).toUpperCase() === 'SHIFT' || !r.requestType) &&
+                            r.requestId !== this.currentRequest.requestId &&
+                            String(r.status || '').toUpperCase() !== 'CANCELLED'
+                        );
+                        if (localDuplicate) {
+                            this.persistentAlertMsg = `Duplicate Mobile: Number ${this.currentRequest.existingMobile} already has an active request. Please find it in your Dashboard and click 'Edit' to update it. If that request is no longer valid, contact your coordinator to mark it as 'Cancelled'.`;
+                            this.showPersistentAlert = true;
+                            this.$nextTick(() => lucide.createIcons());
+                            this.step = 'dashboard';
+                            return;
+                        }
+                    }
+
+                    const res = await this.callApi('mobilePlan_saveRequest', { requestData: this.currentRequest });
+                    if (res) {
+                        this.showToast(this.currentRequest.requestId ? 'Request updated successfully!' : 'Request saved successfully!');
+                        this.fetchRequests();
+                        this.step = 'dashboard';
+                        this.ageConfirmed = false; // Reset for next time
+                    }
+                },
+
+                calculateAge(dobString) {
+                    const birthday = new Date(dobString);
+                    const today = new Date();
+                    let age = today.getFullYear() - birthday.getFullYear();
+                    const m = today.getMonth() - birthday.getMonth();
+                    if (m < 0 || (m === 0 && today.getDate() < birthday.getDate())) {
+                        age--;
+                    }
+                    return age;
+                },
+
+                confirmSaveUnder18() {
+                    this.showAgeConfirm = false;
+                    this.ageConfirmed = true;
+                    this.saveRequest();
+                },
+
+                logout() {
+                    localStorage.removeItem('portal_email');
+                    this.isLoggedIn = false;
+                    this.email = '';
+                    this.otpArray = ['', '', '', '', '', ''];
+                    this.profile = { email: '', uid: '', name: '', primaryMobile: '', telegramId: '', isAdmin: false };
+                    this.requests = [];
+                    this.currentRequest = {};
+                    this.uidDetails = null;
+                    this.aadhaarDisplay = '';
+                    this.step = 'login';
+                },
+
+                formatMobile(num) {
+                    if (!num) return '';
+                    return String(num).replace(/(\d{5})(\d{5})/, '$1 $2');
+                },
+
+                formatDate(iso) {
+                    if (!iso) return '';
+                    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                }
+            }
+        }
+    </script>
+</body>
+</html>

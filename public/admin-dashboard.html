@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | Mobile Plan</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .chart-container { position: relative; width: 100%; height: 300px; }
+        .tooltip {
+            position: absolute;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 100;
+        }
+    </style>
+    <script>
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbymDBdvvSP3qZCyJym2EzcnlMtznYTYiZKFAOYp1lHbsyH3i38QudtKF8xzA0ZBTM6v/exec";
+
+        function adminDashboard() {
+            return {
+                email: '',
+                isAuthorized: false,
+                loading: false,
+                requests: [],
+                profiles: [],
+                submissions: [],
+                stats: {
+                    totalRequests: 0,
+                    activeUsers: 0,
+                    pendingRequests: 0,
+                    processedRequests: 0,
+                    newRequests: 0,
+                    shiftRequests: 0,
+                    duplicateMobilesCount: 0,
+                    duplicateProfilesCount: 0,
+                    orphanedRequestsCount: 0
+                },
+                duplicateMobiles: [],
+                duplicateProfiles: [],
+                orphanedRequests: [],
+                aadhaarExceptions: [],
+                showDuplicatesModal: false,
+                showDuplicateProfilesModal: false,
+                showOrphanedModal: false,
+                showAadhaarExceptionsModal: false,
+                aadhaarDistribution: [],
+                operatorStats: [],
+                expiringData: [],
+
+                async init() {
+                    lucide.createIcons();
+                    this.email = localStorage.getItem('portal_email');
+                    if (!this.email) {
+                        window.location.href = 'index.html';
+                        return;
+                    }
+                    await this.fetchAdminData();
+                },
+
+                async fetchData() {
+                    await this.fetchAdminData();
+                },
+
+                async fetchAdminData() {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(GAS_URL + '?action=mobilePlan_getAdminData&email=' + this.email);
+                        const result = await response.json();
+                        
+                        if (result.error || !result.isAdmin) {
+                            alert('Unauthorized access');
+                            window.location.href = 'index.html';
+                            return;
+                        }
+
+                        this.isAuthorized = true;
+                        const normalizedRequests = (result.requests || []).map(r => ({
+                            ...r,
+                            requestType: String(r.requestType || '').trim().toUpperCase(),
+                            existingOperator: String(r.existingOperator || '').trim().toUpperCase(),
+                            newOperator: String(r.newOperator || '').trim().toUpperCase()
+                        }));
+
+                        this.requests = normalizedRequests;
+                        this.profiles = result.profiles || [];
+                        this.submissions = result.submissions || [];
+                        this.calculateStats();
+                        this.calculateOperatorStats();
+                        
+                        this.$nextTick(() => {
+                            this.renderCharts();
+                            lucide.createIcons();
+                        });
+                    } catch (e) {
+                        console.error(e);
+                        alert('Failed to load admin data');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                calculateStats() {
+                    const activeRequests = this.requests.filter(r => String(r.status || '').toUpperCase() !== 'CANCELLED');
+                    
+                    this.stats.totalRequests = activeRequests.length;
+                    this.stats.activeUsers = this.profiles.length;
+                    this.stats.pendingRequests = activeRequests.filter(r => r.status === 'Applied' || r.status === 'Pending').length;
+                    this.stats.processedRequests = activeRequests.filter(r => r.status === 'Processed' || r.status === 'Sim Delivered').length;
+                    this.stats.newRequests = activeRequests.filter(r => String(r.requestType || '').trim().toUpperCase() === 'NEW').length;
+                    this.stats.shiftRequests = activeRequests.filter(r => {
+                        const type = String(r.requestType || '').trim().toUpperCase();
+                        return type === 'SHIFT' || type === '';
+                    }).length;
+
+                    // Calculate Duplicate Mobiles
+                    const mobileCounts = {};
+                    activeRequests.forEach(r => {
+                        const m = r.existingMobile;
+                        if (m) mobileCounts[m] = (mobileCounts[m] || 0) + 1;
+                    });
+                    this.duplicateMobiles = Object.entries(mobileCounts)
+                        .filter(([m, count]) => count > 1)
+                        .map(([mobile, count]) => ({ mobile, count }))
+                        .sort((a, b) => b.count - a.count);
+                    this.stats.duplicateMobilesCount = this.duplicateMobiles.length;
+
+                    // Calculate Duplicate Profiles (Case-insensitive email)
+                    const emailCounts = {};
+                    this.profiles.forEach(p => {
+                        const email = String(p.email || '').toLowerCase().trim();
+                        if (email) emailCounts[email] = (emailCounts[email] || 0) + 1;
+                    });
+                    this.duplicateProfiles = Object.entries(emailCounts)
+                        .filter(([email, count]) => count > 1)
+                        .map(([email, count]) => ({ email, count }))
+                        .sort((a, b) => b.count - a.count);
+                    this.stats.duplicateProfilesCount = this.duplicateProfiles.length;
+
+                    // Calculate Orphaned Requests (Requests without profile)
+                    const profileEmails = new Set(this.profiles.map(p => String(p.email || '').toLowerCase().trim()));
+                    this.orphanedRequests = activeRequests.filter(r => {
+                        const reqEmail = String(r.email || '').toLowerCase().trim();
+                        return reqEmail && !profileEmails.has(reqEmail);
+                    });
+                    this.stats.orphanedRequestsCount = this.orphanedRequests.length;
+
+                    // Calculate Aadhaar Distribution & Exceptions
+                    const aadhaarCounts = {};
+                    const aadhaarDetails = {};
+                    activeRequests.forEach(r => {
+                        const a = r.aadhaarNo;
+                        if (a) {
+                            aadhaarCounts[a] = (aadhaarCounts[a] || 0) + 1;
+                            if (!aadhaarDetails[a]) aadhaarDetails[a] = { name: r.aadhaarName, mobile: r.existingMobile, email: r.email, connections: [] };
+                            aadhaarDetails[a].connections.push(r.existingMobile || 'New');
+                        }
+                    });
+                    
+                    this.aadhaarExceptions = Object.entries(aadhaarCounts)
+                        .filter(([a, count]) => count > 1)
+                        .map(([aadhaar, count]) => ({
+                            aadhaar,
+                            count,
+                            name: aadhaarDetails[aadhaar].name,
+                            mobiles: aadhaarDetails[aadhaar].connections.join(', ')
+                        }))
+                        .sort((a, b) => b.count - a.count);
+
+                    const freqMap = {};
+                    Object.values(aadhaarCounts).forEach(count => {
+                        freqMap[count] = (freqMap[count] || 0) + 1;
+                    });
+
+                    this.aadhaarDistribution = Object.entries(freqMap)
+                        .map(([connections, holders]) => ({
+                            connections: parseInt(connections),
+                            holders: holders,
+                            totalConnections: parseInt(connections) * holders
+                        }))
+                        .sort((a, b) => a.connections - b.connections);
+
+                    // Calculate Expiring Connections (Next 30 Days)
+                    const now = new Date();
+                    const next30Days = new Date();
+                    next30Days.setDate(now.getDate() + 30);
+                    
+                    const expiryCounts = {};
+                    activeRequests.forEach(r => {
+                        if (r.expiryDate) {
+                            const exp = new Date(r.expiryDate);
+                            if (exp >= now && exp <= next30Days) {
+                                const dateStr = exp.toISOString().split('T')[0];
+                                expiryCounts[dateStr] = (expiryCounts[dateStr] || 0) + 1;
+                            }
+                        }
+                    });
+
+                    this.expiringData = [];
+                    for (let i = 0; i <= 30; i++) {
+                        const d = new Date();
+                        d.setDate(now.getDate() + i);
+                        const dateStr = d.toISOString().split('T')[0];
+                        this.expiringData.push({
+                            date: dateStr,
+                            count: expiryCounts[dateStr] || 0
+                        });
+                    }
+                },
+
+                calculateOperatorStats() {
+                    const activeRequests = this.requests.filter(r => String(r.status || '').toUpperCase() !== 'CANCELLED');
+                    const operators = ['Airtel', 'Jio', 'VI', 'BSNL'];
+                    this.operatorStats = operators.map(op => {
+                        const targetOp = op.toUpperCase();
+                        const gained = activeRequests.filter(r => String(r.newOperator || '').trim().toUpperCase() === targetOp && String(r.existingOperator || '').trim().toUpperCase() !== targetOp).length;
+                        const lost = activeRequests.filter(r => String(r.existingOperator || '').trim().toUpperCase() === targetOp && String(r.newOperator || '').trim().toUpperCase() !== targetOp).length;
+                        return {
+                            name: op,
+                            gained,
+                            lost,
+                            net: gained - lost
+                        };
+                    });
+                },
+
+                renderCharts() {
+                    try { this.renderTrendsChart(); } catch (e) { console.error("Trends Chart Error:", e); }
+                    try { this.renderOperatorChart(); } catch (e) { console.error("Operator Chart Error:", e); }
+                    try { this.renderExpiringChart(); } catch (e) { console.error("Expiring Chart Error:", e); }
+                    try { this.renderZoneChart(); } catch (e) { console.error("Zone Chart Error:", e); }
+                    try { this.renderSubZoneChart(); } catch (e) { console.error("Sub-Zone Chart Error:", e); }
+                    try { this.renderAadhaarChart(); } catch (e) { console.error("Aadhaar Chart Error:", e); }
+                },
+
+                renderExpiringChart() {
+                    const container = d3.select("#expiring-chart");
+                    container.selectAll("*").remove();
+                    
+                    const width = container.node().getBoundingClientRect().width;
+                    const height = 300;
+                    const margin = { top: 30, right: 30, bottom: 50, left: 40 };
+
+                    const data = this.expiringData;
+
+                    const x = d3.scaleBand()
+                        .domain(data.map(d => d.date))
+                        .range([margin.left, width - margin.right])
+                        .padding(0.2);
+
+                    const y = d3.scaleLinear()
+                        .domain([0, d3.max(data, d => d.count) || 5])
+                        .range([height - margin.bottom, margin.top]);
+
+                    const svg = container.append("svg")
+                        .attr("width", width)
+                        .attr("height", height);
+
+                    svg.append("g")
+                        .selectAll("rect")
+                        .data(data)
+                        .enter()
+                        .append("rect")
+                        .attr("x", d => x(d.date))
+                        .attr("y", d => y(d.count))
+                        .attr("height", d => y(0) - y(d.count))
+                        .attr("width", x.bandwidth())
+                        .attr("fill", "#ef4444")
+                        .attr("rx", 2);
+
+                    svg.selectAll(".bar-label")
+                        .data(data)
+                        .enter()
+                        .append("text")
+                        .attr("x", d => x(d.date) + x.bandwidth() / 2)
+                        .attr("y", d => y(d.count) - 5)
+                        .attr("text-anchor", "middle")
+                        .attr("font-size", "10px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#b91c1c")
+                        .text(d => d.count > 0 ? d.count : "");
+
+                    svg.append("g")
+                        .attr("transform", `translate(0,${height - margin.bottom})`)
+                        .call(d3.axisBottom(x).tickValues(x.domain().filter((d, i) => !(i % 5))).tickFormat(d => d.split('-').slice(1).reverse().join('/')))
+                        .selectAll("text")
+                        .style("font-size", "10px");
+
+                    svg.append("g")
+                        .attr("transform", `translate(${margin.left},0)`)
+                        .call(d3.axisLeft(y).ticks(5));
+                },
+
+                renderTrendsChart() {
+                    const container = d3.select("#trends-chart");
+                    container.selectAll("*").remove();
+                    
+                    const width = container.node().getBoundingClientRect().width;
+                    const height = 300;
+                    const margin = { top: 30, right: 40, bottom: 40, left: 40 };
+
+                    const activeRequests = this.requests.filter(r => String(r.status || '').toUpperCase() !== 'CANCELLED' && (r.updatedAt || r.createdAt));
+                    const dataByDate = d3.rollups(
+                        activeRequests,
+                        v => v.length,
+                        d => {
+                            const dateStr = d.updatedAt || d.createdAt;
+                            const date = new Date(dateStr);
+                            return isNaN(date.getTime()) ? 'Invalid' : date.toISOString().split('T')[0];
+                        }
+                    ).filter(d => d[0] !== 'Invalid')
+                    .sort((a, b) => a[0].localeCompare(b[0]));
+
+                    if (dataByDate.length === 0) {
+                        container.append("div")
+                            .attr("class", "flex items-center justify-center h-full text-gray-400 text-sm")
+                            .text("No trend data available");
+                        return;
+                    }
+
+                    const x = d3.scaleTime()
+                        .domain(d3.extent(dataByDate, d => new Date(d[0])))
+                        .range([margin.left, width - margin.right]);
+
+                    const y = d3.scaleLinear()
+                        .domain([0, d3.max(dataByDate, d => d[1]) * 1.2])
+                        .range([height - margin.bottom, margin.top]);
+
+                    const svg = container.append("svg")
+                        .attr("width", width)
+                        .attr("height", height);
+
+                    svg.append("g")
+                        .attr("class", "grid")
+                        .attr("transform", `translate(0,${height - margin.bottom})`)
+                        .call(d3.axisBottom(x).ticks(5).tickSize(-height + margin.top + margin.bottom).tickFormat(""))
+                        .attr("stroke-opacity", 0.05);
+
+                    svg.append("g")
+                        .attr("class", "grid")
+                        .attr("transform", `translate(${margin.left},0)`)
+                        .call(d3.axisLeft(y).ticks(5).tickSize(-width + margin.left + margin.right).tickFormat(""))
+                        .attr("stroke-opacity", 0.05);
+
+                    const line = d3.line()
+                        .x(d => x(new Date(d[0])))
+                        .y(d => y(d[1]))
+                        .curve(d3.curveMonotoneX);
+
+                    svg.append("path")
+                        .datum(dataByDate)
+                        .attr("fill", "none")
+                        .attr("stroke", "#3b82f6")
+                        .attr("stroke-width", 3)
+                        .attr("d", line);
+
+                    const area = d3.area()
+                        .x(d => x(new Date(d[0])))
+                        .y0(height - margin.bottom)
+                        .y1(d => y(d[1]))
+                        .curve(d3.curveMonotoneX);
+
+                    svg.append("path")
+                        .datum(dataByDate)
+                        .attr("fill", "url(#gradient-blue)")
+                        .attr("d", area);
+
+                    svg.selectAll(".dot")
+                        .data(dataByDate)
+                        .enter()
+                        .append("circle")
+                        .attr("cx", d => x(new Date(d[0])))
+                        .attr("cy", d => y(d[1]))
+                        .attr("r", 4)
+                        .attr("fill", "#3b82f6")
+                        .attr("stroke", "white")
+                        .attr("stroke-width", 2);
+
+                    svg.selectAll(".label")
+                        .data(dataByDate)
+                        .enter()
+                        .append("text")
+                        .attr("x", d => x(new Date(d[0])))
+                        .attr("y", d => y(d[1]) - 10)
+                        .attr("text-anchor", "middle")
+                        .attr("font-size", "10px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#1e40af")
+                        .text(d => d[1]);
+
+                    const defs = svg.append("defs");
+                    const gradient = defs.append("linearGradient")
+                        .attr("id", "gradient-blue")
+                        .attr("x1", "0%").attr("y1", "0%")
+                        .attr("x2", "0%").attr("y2", "100%");
+                    gradient.append("stop").attr("offset", "0%").attr("stop-color", "#3b82f6").attr("stop-opacity", 0.2);
+                    gradient.append("stop").attr("offset", "100%").attr("stop-color", "#3b82f6").attr("stop-opacity", 0);
+
+                    svg.append("g")
+                        .attr("transform", `translate(0,${height - margin.bottom})`)
+                        .call(d3.axisBottom(x).ticks(d3.timeDay.every(1)).tickFormat(d3.timeFormat("%d %b")));
+
+                    svg.append("g")
+                        .attr("transform", `translate(${margin.left},0)`)
+                        .call(d3.axisLeft(y).ticks(5));
+                },
+
+                renderOperatorChart() {
+                    const container = d3.select("#operator-chart");
+                    container.selectAll("*").remove();
+                    
+                    const width = container.node().getBoundingClientRect().width;
+                    const height = 300;
+                    const radius = Math.min(width, height) / 2 - 40;
+
+                    const activeRequests = this.requests.filter(r => String(r.status || '').toUpperCase() !== 'CANCELLED');
+                    const data = d3.rollups(activeRequests, v => v.length, d => d.newOperator || 'Unknown');
+                    if (data.length === 0) {
+                        container.append("div")
+                            .attr("class", "flex items-center justify-center h-full text-gray-400 text-sm")
+                            .text("No operator data available");
+                        return;
+                    }
+                    const color = d3.scaleOrdinal()
+                        .domain(data.map(d => d[0]))
+                        .range(["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"]);
+
+                    const svg = container.append("svg")
+                        .attr("width", width)
+                        .attr("height", height)
+                        .append("g")
+                        .attr("transform", `translate(${width / 2},${height / 2})`);
+
+                    const pie = d3.pie().value(d => d[1]);
+                    const arc = d3.arc().innerRadius(radius * 0.6).outerRadius(radius);
+
+                    const arcs = svg.selectAll("arc")
+                        .data(pie(data))
+                        .enter()
+                        .append("g");
+
+                    arcs.append("path")
+                        .attr("d", arc)
+                        .attr("fill", d => color(d.data[0]))
+                        .attr("stroke", "white")
+                        .style("stroke-width", "2px");
+
+                    const legend = svg.append("g")
+                        .attr("transform", `translate(${radius + 20}, ${-radius})`);
+
+                    data.forEach((d, i) => {
+                        const g = legend.append("g").attr("transform", `translate(0, ${i * 20})`);
+                        g.append("rect").attr("width", 12).attr("height", 12).attr("fill", color(d[0]));
+                        g.append("text").attr("x", 18).attr("y", 10).text(`${d[0]} (${d[1]})`).style("font-size", "12px");
+                    });
+                },
+
+                renderZoneChart() {
+                    const container = d3.select("#zone-chart");
+                    container.selectAll("*").remove();
+                    
+                    const width = container.node().getBoundingClientRect().width;
+                    const height = 350;
+                    const margin = { top: 30, right: 30, bottom: 80, left: 60 };
+
+                    const submissionMap = new Map();
+                    this.submissions.forEach(s => {
+                        const uid = String(s.cenUid || s.uid || s.billingUid || '').trim();
+                        if (uid) submissionMap.set(uid, s);
+                    });
+
+                    const activeRequests = this.requests.filter(r => String(r.status || '').toUpperCase() !== 'CANCELLED');
+                    const data = d3.rollups(activeRequests, v => v.length, d => {
+                        const uid = String(d.billingUid || '').trim();
+                        const sub = submissionMap.get(uid);
+                        return sub ? (sub.zone || 'Unknown') : 'Unknown';
+                    })
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 15);
+
+                    if (data.length === 0) {
+                        container.append("div")
+                            .attr("class", "flex items-center justify-center h-full text-gray-400 text-sm")
+                            .text("No zone data available");
+                        return;
+                    }
+
+                    const x = d3.scaleBand()
+                        .domain(data.map(d => d[0]))
+                        .range([margin.left, width - margin.right])
+                        .padding(0.3);
+
+                    const y = d3.scaleLinear()
+                        .domain([0, d3.max(data, d => d[1]) * 1.2])
+                        .range([height - margin.bottom, margin.top]);
+
+                    const svg = container.append("svg")
+                        .attr("width", width)
+                        .attr("height", height);
+
+                    svg.append("g")
+                        .selectAll("rect")
+                        .data(data)
+                        .enter()
+                        .append("rect")
+                        .attr("x", d => x(d[0]))
+                        .attr("y", d => y(d[1]))
+                        .attr("height", d => y(0) - y(d[1]))
+                        .attr("width", x.bandwidth())
+                        .attr("fill", "#3b82f6")
+                        .attr("rx", 4);
+
+                    svg.selectAll(".bar-label")
+                        .data(data)
+                        .enter()
+                        .append("text")
+                        .attr("x", d => x(d[0]) + x.bandwidth() / 2)
+                        .attr("y", d => y(d[1]) - 5)
+                        .attr("text-anchor", "middle")
+                        .attr("font-size", "10px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#1e40af")
+                        .text(d => d[1]);
+
+                    svg.append("g")
+                        .attr("transform", `translate(0,${height - margin.bottom})`)
+                        .call(d3.axisBottom(x))
+                        .selectAll("text")
+                        .attr("transform", "rotate(-45)")
+                        .style("text-anchor", "end")
+                        .style("font-size", "10px");
+
+                    svg.append("g")
+                        .attr("transform", `translate(${margin.left},0)`)
+                        .call(d3.axisLeft(y).ticks(5));
+                },
+
+                renderSubZoneChart() {
+                    const container = d3.select("#sub-zone-chart");
+                    container.selectAll("*").remove();
+                    
+                    const width = container.node().getBoundingClientRect().width;
+                    const height = 350;
+                    const margin = { top: 30, right: 30, bottom: 80, left: 60 };
+
+                    const submissionMap = new Map();
+                    this.submissions.forEach(s => {
+                        const uid = String(s.cenUid || s.uid || s.billingUid || '').trim();
+                        if (uid) submissionMap.set(uid, s);
+                    });
+
+                    const activeRequests = this.requests.filter(r => String(r.status || '').toUpperCase() !== 'CANCELLED');
+                    const data = d3.rollups(activeRequests, v => v.length, d => {
+                        const uid = String(d.billingUid || '').trim();
+                        const sub = submissionMap.get(uid);
+                        return sub ? (sub.subZone || 'Other') : 'Other';
+                    })
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 15);
+
+                    if (data.length === 0) {
+                        container.append("div")
+                            .attr("class", "flex items-center justify-center h-full text-gray-400 text-sm")
+                            .text("No sub-zone data available");
+                        return;
+                    }
+
+                    const x = d3.scaleBand()
+                        .domain(data.map(d => d[0]))
+                        .range([margin.left, width - margin.right])
+                        .padding(0.3);
+
+                    const y = d3.scaleLinear()
+                        .domain([0, d3.max(data, d => d[1]) * 1.2])
+                        .range([height - margin.bottom, margin.top]);
+
+                    const svg = container.append("svg")
+                        .attr("width", width)
+                        .attr("height", height);
+
+                    svg.append("g")
+                        .selectAll("rect")
+                        .data(data)
+                        .enter()
+                        .append("rect")
+                        .attr("x", d => x(d[0]))
+                        .attr("y", d => y(d[1]))
+                        .attr("height", d => y(0) - y(d[1]))
+                        .attr("width", x.bandwidth())
+                        .attr("fill", "#10b981")
+                        .attr("rx", 4);
+
+                    svg.selectAll(".bar-label")
+                        .data(data)
+                        .enter()
+                        .append("text")
+                        .attr("x", d => x(d[0]) + x.bandwidth() / 2)
+                        .attr("y", d => y(d[1]) - 5)
+                        .attr("text-anchor", "middle")
+                        .attr("font-size", "10px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#065f46")
+                        .text(d => d[1]);
+
+                    svg.append("g")
+                        .attr("transform", `translate(0,${height - margin.bottom})`)
+                        .call(d3.axisBottom(x))
+                        .selectAll("text")
+                        .attr("transform", "rotate(-45)")
+                        .style("text-anchor", "end")
+                        .style("font-size", "10px");
+
+                    svg.append("g")
+                        .attr("transform", `translate(${margin.left},0)`)
+                        .call(d3.axisLeft(y).ticks(5));
+                },
+
+                renderAadhaarChart() {
+                    const container = d3.select("#aadhaar-chart");
+                    container.selectAll("*").remove();
+                    
+                    const width = container.node().getBoundingClientRect().width;
+                    const height = 350;
+                    const margin = { top: 40, right: 60, bottom: 50, left: 60 };
+
+                    const data = this.aadhaarDistribution;
+
+                    if (data.length === 0) {
+                        container.append("div")
+                            .attr("class", "flex items-center justify-center h-full text-gray-400 text-sm")
+                            .text("No Aadhaar distribution data available");
+                        return;
+                    }
+
+                    const x = d3.scaleBand()
+                        .domain(data.map(d => d.connections))
+                        .range([margin.left, width - margin.right])
+                        .padding(0.3);
+
+                    const yHolders = d3.scaleLinear()
+                        .domain([0, d3.max(data, d => d.holders) * 1.2])
+                        .range([height - margin.bottom, margin.top]);
+
+                    const yTotal = d3.scaleLinear()
+                        .domain([0, d3.max(data, d => d.totalConnections) * 1.2])
+                        .range([height - margin.bottom, margin.top]);
+
+                    const svg = container.append("svg")
+                        .attr("width", width)
+                        .attr("height", height);
+
+                    // Holders Bars
+                    svg.append("g")
+                        .selectAll("rect")
+                        .data(data)
+                        .enter()
+                        .append("rect")
+                        .attr("x", d => x(d.connections))
+                        .attr("y", d => yHolders(d.holders))
+                        .attr("height", d => yHolders(0) - yHolders(d.holders))
+                        .attr("width", x.bandwidth())
+                        .attr("fill", "#6366f1")
+                        .attr("rx", 4)
+                        .attr("opacity", 0.8);
+
+                    // Total Connections Line
+                    const line = d3.line()
+                        .x(d => x(d.connections) + x.bandwidth() / 2)
+                        .y(d => yTotal(d.totalConnections))
+                        .curve(d3.curveMonotoneX);
+
+                    svg.append("path")
+                        .datum(data)
+                        .attr("fill", "none")
+                        .attr("stroke", "#ef4444")
+                        .attr("stroke-width", 3)
+                        .attr("d", line);
+
+                    svg.selectAll(".dot")
+                        .data(data)
+                        .enter()
+                        .append("circle")
+                        .attr("cx", d => x(d.connections) + x.bandwidth() / 2)
+                        .attr("cy", d => yTotal(d.totalConnections))
+                        .attr("r", 4)
+                        .attr("fill", "#ef4444")
+                        .attr("stroke", "white")
+                        .attr("stroke-width", 2);
+
+                    // Labels for Holders
+                    svg.selectAll(".holder-label")
+                        .data(data)
+                        .enter()
+                        .append("text")
+                        .attr("x", d => x(d.connections) + x.bandwidth() / 2)
+                        .attr("y", d => yHolders(d.holders) - 5)
+                        .attr("text-anchor", "middle")
+                        .attr("font-size", "10px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#4338ca")
+                        .text(d => d.holders + ' Holders');
+
+                    // Labels for Total
+                    svg.selectAll(".total-label")
+                        .data(data)
+                        .enter()
+                        .append("text")
+                        .attr("x", d => x(d.connections) + x.bandwidth() / 2)
+                        .attr("y", d => yTotal(d.totalConnections) - 15)
+                        .attr("text-anchor", "middle")
+                        .attr("font-size", "10px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#b91c1c")
+                        .text(d => 'Total: ' + d.totalConnections);
+
+                    // X Axis
+                    svg.append("g")
+                        .attr("transform", `translate(0,${height - margin.bottom})`)
+                        .call(d3.axisBottom(x))
+                        .append("text")
+                        .attr("x", width / 2)
+                        .attr("y", 40)
+                        .attr("fill", "black")
+                        .attr("font-weight", "bold")
+                        .text("Connections per Aadhaar");
+
+                    // Y Axis Left (Holders)
+                    svg.append("g")
+                        .attr("transform", `translate(${margin.left},0)`)
+                        .call(d3.axisLeft(yHolders).ticks(5))
+                        .append("text")
+                        .attr("transform", "rotate(-90)")
+                        .attr("y", -45)
+                        .attr("x", -height / 2)
+                        .attr("fill", "#6366f1")
+                        .attr("font-weight", "bold")
+                        .attr("text-anchor", "middle")
+                        .text("No. of Aadhaar Holders");
+
+                    // Y Axis Right (Total Connections)
+                    svg.append("g")
+                        .attr("transform", `translate(${width - margin.right},0)`)
+                        .call(d3.axisRight(yTotal).ticks(5))
+                        .append("text")
+                        .attr("transform", "rotate(-90)")
+                        .attr("y", 45)
+                        .attr("x", -height / 2)
+                        .attr("fill", "#ef4444")
+                        .attr("font-weight", "bold")
+                        .attr("text-anchor", "middle")
+                        .text("Total Connections");
+                },
+
+                logout() {
+                    localStorage.removeItem('portal_email');
+                    window.location.href = 'index.html';
+                },
+
+                formatDate(iso) {
+                    if (!iso) return '';
+                    const date = new Date(iso);
+                    if (isNaN(date.getTime())) return iso;
+                    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900" x-data="adminDashboard()">
+
+    <!-- Header -->
+    <header class="bg-white border-b sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <a href="index.html" class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">B</a>
+                <h1 class="font-bold text-lg tracking-tight">Admin Dashboard</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <button @click="fetchData()" :disabled="loading" class="flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                    <i data-lucide="refresh-cw" class="w-4 h-4" :class="loading ? 'animate-spin' : ''"></i>
+                    Refresh
+                </button>
+                <span class="text-sm text-gray-500 hidden sm:inline" x-text="email"></span>
+                <button @click="logout()" class="text-gray-500 hover:text-red-600 transition-colors">
+                    <i data-lucide="log-out" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4 md:p-8 space-y-8" x-show="isAuthorized" x-cloak>
+        
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                        <i data-lucide="file-text" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="text-xl font-bold" x-text="stats.totalRequests">0</div>
+                <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">Total Requests</div>
+                <div class="flex items-center gap-3 pt-2 border-t border-gray-50">
+                    <div>
+                        <div class="text-xs font-bold text-blue-600" x-text="stats.newRequests">0</div>
+                        <div class="text-[8px] uppercase font-bold text-gray-400 tracking-wider">New</div>
+                    </div>
+                    <div class="w-px h-4 bg-gray-100"></div>
+                    <div>
+                        <div class="text-xs font-bold text-indigo-600" x-text="stats.shiftRequests">0</div>
+                        <div class="text-[8px] uppercase font-bold text-gray-400 tracking-wider">Shifting</div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center text-green-600">
+                        <i data-lucide="users" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="text-xl font-bold" x-text="stats.activeUsers">0</div>
+                <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Active Users</div>
+            </div>
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="w-8 h-8 bg-yellow-50 rounded-lg flex items-center justify-center text-yellow-600">
+                        <i data-lucide="clock" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="text-xl font-bold" x-text="stats.pendingRequests">0</div>
+                <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Pending</div>
+            </div>
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center text-purple-600">
+                        <i data-lucide="check-circle" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="text-xl font-bold" x-text="stats.processedRequests">0</div>
+                <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Processed</div>
+            </div>
+            <!-- Duplicate Mobiles Card -->
+            <button @click="showDuplicatesModal = true" class="bg-white p-4 rounded-2xl shadow-sm border border-orange-100 hover:border-orange-300 transition-all text-left group">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="w-8 h-8 bg-orange-50 rounded-lg flex items-center justify-center text-orange-600 group-hover:scale-110 transition-transform">
+                        <i data-lucide="copy" class="w-4 h-4"></i>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-orange-200 group-hover:text-orange-400 transition-colors"></i>
+                </div>
+                <div class="text-xl font-bold text-orange-600" x-text="stats.duplicateMobilesCount">0</div>
+                <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Duplicate Mobiles</div>
+            </button>
+
+            <!-- Orphaned Requests Card -->
+            <button @click="showOrphanedModal = true" class="bg-white p-4 rounded-2xl shadow-sm border border-red-100 hover:border-red-300 transition-all text-left group">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center text-red-600 group-hover:scale-110 transition-transform">
+                        <i data-lucide="user-x" class="w-4 h-4"></i>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-red-200 group-hover:text-red-400 transition-colors"></i>
+                </div>
+                <div class="text-xl font-bold text-red-600" x-text="stats.orphanedRequestsCount">0</div>
+                <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Requests Without Profile</div>
+            </button>
+
+            <!-- Duplicate Profiles Card -->
+            <button @click="showDuplicateProfilesModal = true" class="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 hover:border-indigo-300 transition-all text-left group">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
+                        <i data-lucide="users-round" class="w-4 h-4"></i>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-indigo-200 group-hover:text-indigo-400 transition-colors"></i>
+                </div>
+                <div class="text-xl font-bold text-indigo-600" x-text="stats.duplicateProfilesCount">0</div>
+                <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Duplicate Profiles</div>
+            </button>
+        </div>
+
+        <!-- Operator Net Gains/Losses -->
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <h3 class="text-lg font-bold mb-6">Operator Net Gains / Losses</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <template x-for="op in operatorStats" :key="op.name">
+                    <div class="p-4 rounded-xl border border-gray-50 bg-gray-50/30">
+                        <div class="font-bold text-gray-900 mb-2" x-text="op.name"></div>
+                        <div class="grid grid-cols-3 gap-2 text-center">
+                            <div>
+                                <div class="text-[10px] uppercase text-gray-400 font-bold">Gained</div>
+                                <div class="text-sm font-bold text-green-600" x-text="'+' + op.gained"></div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] uppercase text-gray-400 font-bold">Lost</div>
+                                <div class="text-sm font-bold text-red-600" x-text="'-' + op.lost"></div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] uppercase text-gray-400 font-bold">Net</div>
+                                <div class="text-sm font-bold" :class="op.net >= 0 ? 'text-blue-600' : 'text-orange-600'" x-text="(op.net >= 0 ? '+' : '') + op.net"></div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Request Trends -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 class="text-lg font-bold mb-6">Request Trends (Daily)</h3>
+                <div id="trends-chart" class="chart-container"></div>
+            </div>
+
+            <!-- Operator Distribution -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 class="text-lg font-bold mb-6">Operator Distribution</h3>
+                <div id="operator-chart" class="chart-container"></div>
+            </div>
+
+            <!-- Zone Distribution -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2">
+                <h3 class="text-lg font-bold mb-6">Zone Distribution</h3>
+                <div id="zone-chart" class="chart-container" style="height: 350px;"></div>
+            </div>
+
+            <!-- Sub-Zone Distribution -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2">
+                <h3 class="text-lg font-bold mb-6">Sub-Zone Distribution</h3>
+                <div id="sub-zone-chart" class="chart-container" style="height: 350px;"></div>
+            </div>
+
+            <!-- Aadhaar Distribution -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-lg font-bold">Aadhaar Connection Distribution</h3>
+                    <div class="flex items-center gap-4">
+                        <button @click="showAadhaarExceptionsModal = true" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                            View Exceptions
+                        </button>
+                        <div class="flex items-center gap-4 text-xs">
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-3 h-3 bg-indigo-500 rounded-sm"></div>
+                                <span class="text-gray-500">Holders</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-3 h-3 bg-red-500 rounded-sm"></div>
+                                <span class="text-gray-500">Total Connections</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="aadhaar-chart" class="chart-container" style="height: 350px;"></div>
+            </div>
+
+            <!-- Expiring Connections -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2">
+                <h3 class="text-lg font-bold mb-6">Expiring Connections (Next 30 Days)</h3>
+                <div id="expiring-chart" class="chart-container" style="height: 300px;"></div>
+            </div>
+        </div>
+
+        <!-- View All Requests Link -->
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center space-y-4">
+            <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto text-blue-600">
+                <i data-lucide="list" class="w-8 h-8"></i>
+            </div>
+            <div class="max-w-md mx-auto">
+                <h3 class="text-xl font-bold text-gray-900">Detailed Request Records</h3>
+                <p class="text-gray-500 mt-2">Access the complete history of all connection requests with advanced search and pagination.</p>
+            </div>
+            <div class="pt-4">
+                <a href="all-requests.html" class="inline-flex items-center gap-2 bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100">
+                    View All Requests
+                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-4">
+        <div class="animate-spin border-4 border-blue-600 border-t-transparent rounded-full w-12 h-12"></div>
+        <p class="text-gray-600 font-medium">Loading Analytics...</p>
+    </div>
+
+    <!-- Aadhaar Exceptions Modal -->
+    <div x-show="showAadhaarExceptionsModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" x-cloak>
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden" @click.away="showAadhaarExceptionsModal = false">
+            <div class="p-6 border-b flex items-center justify-between bg-blue-50">
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900">Aadhaar Exceptions</h3>
+                    <p class="text-sm text-gray-500">Users with multiple connections on a single Aadhaar</p>
+                </div>
+                <button @click="showAadhaarExceptionsModal = false" class="p-2 hover:bg-white rounded-full transition-colors">
+                    <i data-lucide="x" class="w-6 h-6 text-gray-400"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6">
+                <div class="space-y-4">
+                    <template x-for="ex in aadhaarExceptions" :key="ex.aadhaar">
+                        <div class="p-4 rounded-2xl border border-gray-100 bg-gray-50/50 hover:bg-white hover:shadow-md transition-all">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="font-bold text-gray-900" x-text="ex.name"></div>
+                                <div class="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold" x-text="ex.count + ' Connections'"></div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4 text-xs">
+                                <div>
+                                    <div class="text-gray-400 font-bold uppercase tracking-wider mb-1">Aadhaar No.</div>
+                                    <div class="text-gray-600 font-mono" x-text="ex.aadhaar"></div>
+                                </div>
+                                <div>
+                                    <div class="text-gray-400 font-bold uppercase tracking-wider mb-1">Mobiles</div>
+                                    <div class="text-gray-600" x-text="ex.mobiles"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Orphaned Requests Modal -->
+    <div x-show="showOrphanedModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" x-cloak>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden" @click.away="showOrphanedModal = false">
+            <div class="p-6 border-b flex items-center justify-between bg-red-600 text-white">
+                <div>
+                    <h3 class="text-lg font-bold">Requests Without Profile</h3>
+                    <p class="text-xs text-red-100">These requests exist but have no corresponding user profile data.</p>
+                </div>
+                <button @click="showOrphanedModal = false" class="hover:bg-white/20 p-1 rounded-lg transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[70vh]">
+                <div class="mb-6 p-4 bg-red-50 rounded-xl border border-red-100">
+                    <h4 class="text-sm font-bold text-red-800 mb-2 flex items-center gap-2">
+                        <i data-lucide="help-circle" class="w-4 h-4"></i>
+                        Possible Reasons for Orphaned Records:
+                    </h4>
+                    <ul class="text-xs text-red-700 space-y-1 list-disc pl-5">
+                        <li><b>Setup Bypass:</b> Users might have accessed the request form directly without completing the one-time profile setup.</li>
+                        <li><b>Setup Failure:</b> A network error might have occurred after saving the request but before the profile was saved.</li>
+                        <li><b>Data Deletion:</b> User profiles might have been deleted from the spreadsheet while their connection requests remained.</li>
+                        <li><b>Email Mismatch:</b> Inconsistencies in email formatting (case sensitivity or trailing spaces) between the Requests and Profiles sheets.</li>
+                        <li><b>Manual Entry:</b> Records might have been added directly to the spreadsheet by an administrator.</li>
+                    </ul>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                                <th class="px-4 py-3">Email</th>
+                                <th class="px-4 py-3">Aadhaar Name</th>
+                                <th class="px-4 py-3">Mobile</th>
+                                <th class="px-4 py-3">Status</th>
+                                <th class="px-4 py-3">Updated At</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-sm">
+                            <template x-for="req in orphanedRequests" :key="req.requestId">
+                                <tr class="border-b hover:bg-gray-50 transition-colors">
+                                    <td class="px-4 py-3 font-medium text-gray-900" x-text="req.email"></td>
+                                    <td class="px-4 py-3 text-gray-600" x-text="req.aadhaarName"></td>
+                                    <td class="px-4 py-3 font-mono text-gray-600" x-text="req.existingMobile"></td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-gray-100 text-gray-600" x-text="req.status"></span>
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500" x-text="formatDate(req.updatedAt)"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="p-4 border-t bg-gray-50 flex justify-end">
+                <button @click="showOrphanedModal = false" class="px-6 py-2 bg-gray-900 text-white rounded-xl font-bold hover:bg-gray-800 transition-all">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="tooltip"></div>
+
+    <!-- Duplicate Mobiles Modal -->
+    <div x-show="showDuplicatesModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" @click="showDuplicatesModal = false"></div>
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg relative z-10 overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="p-6 border-b flex items-center justify-between bg-orange-50">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600">
+                        <i data-lucide="copy" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900">Duplicate Mobile Numbers</h3>
+                        <p class="text-xs text-orange-600 font-medium" x-text="stats.duplicateMobilesCount + ' numbers have multiple entries'"></p>
+                    </div>
+                </div>
+                <button @click="showDuplicatesModal = false" class="p-2 hover:bg-orange-100 rounded-full transition-colors text-orange-400 hover:text-orange-600">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="overflow-y-auto p-2">
+                <table class="w-full text-left">
+                    <thead class="sticky top-0 bg-white z-10">
+                        <tr class="text-[10px] uppercase font-bold text-gray-400 tracking-wider border-b">
+                            <th class="px-6 py-3">Mobile Number</th>
+                            <th class="px-6 py-3 text-right">Entry Count</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50">
+                        <template x-for="item in duplicateMobiles" :key="item.mobile">
+                            <tr class="hover:bg-gray-50 transition-colors">
+                                <td class="px-6 py-4 font-mono font-bold text-gray-700" x-text="item.mobile"></td>
+                                <td class="px-6 py-4 text-right">
+                                    <span class="bg-orange-100 text-orange-700 px-2.5 py-1 rounded-lg text-xs font-bold" x-text="item.count + ' entries'"></span>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div x-show="duplicateMobiles.length === 0" class="p-12 text-center text-gray-400 italic">
+                    No duplicate mobile numbers found.
+                </div>
+            </div>
+            <div class="p-4 bg-gray-50 border-t text-center">
+                <p class="text-[10px] text-gray-400 uppercase font-bold tracking-widest">End of List</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Duplicate Profiles Modal -->
+    <div x-show="showDuplicateProfilesModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" @click="showDuplicateProfilesModal = false"></div>
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg relative z-10 overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="p-6 border-b flex items-center justify-between bg-indigo-50">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                        <i data-lucide="users-round" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900">Duplicate Profiles</h3>
+                        <p class="text-xs text-indigo-600 font-medium" x-text="stats.duplicateProfilesCount + ' emails have multiple profile entries'"></p>
+                    </div>
+                </div>
+                <button @click="showDuplicateProfilesModal = false" class="p-2 hover:bg-indigo-100 rounded-full transition-colors text-indigo-400 hover:text-indigo-600">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="overflow-y-auto p-2">
+                <table class="w-full text-left">
+                    <thead class="sticky top-0 bg-white z-10">
+                        <tr class="text-[10px] uppercase font-bold text-gray-400 tracking-wider border-b">
+                            <th class="px-6 py-3">Email Address</th>
+                            <th class="px-6 py-3 text-right">Profile Count</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50">
+                        <template x-for="item in duplicateProfiles" :key="item.email">
+                            <tr class="hover:bg-gray-50 transition-colors">
+                                <td class="px-6 py-4 font-medium text-gray-700" x-text="item.email"></td>
+                                <td class="px-6 py-4 text-right">
+                                    <span class="bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg text-xs font-bold" x-text="item.count + ' profiles'"></span>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div x-show="duplicateProfiles.length === 0" class="p-12 text-center text-gray-400 italic">
+                    No duplicate profiles found.
+                </div>
+            </div>
+            <div class="p-4 bg-gray-50 border-t text-center">
+                <p class="text-[10px] text-gray-400 uppercase font-bold tracking-widest">End of List</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

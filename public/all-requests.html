@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Requests | Admin Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+    <script>
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbymDBdvvSP3qZCyJym2EzcnlMtznYTYiZKFAOYp1lHbsyH3i38QudtKF8xzA0ZBTM6v/exec";
+
+        function allRequestsPage() {
+            return {
+                email: '',
+                isAuthorized: false,
+                loading: false,
+                searchQuery: '',
+                statusFilter: 'ALL', // New: Server-side status filter
+                showOnlyDuplicates: false,
+                duplicateMobiles: new Set(),
+                requests: [],
+                pageSize: 25,
+                currentPage: 1,
+                sortKey: 'date',
+                sortOrder: 'desc',
+
+                // SIM Modal State
+                showSimModal: false,
+                showViewModal: false,
+                selectedRequest: null,
+                simNumber: '',
+                upCode: '',
+                upcExpiry: '',
+                simError: '',
+                upCodeError: '',
+                expiryFilterDays: null,
+                upcExpiryFilterDays: null,
+
+                async init() {
+                    lucide.createIcons();
+                    this.email = localStorage.getItem('portal_email');
+                    if (!this.email) {
+                        window.location.href = 'index.html';
+                        return;
+                    }
+                    await this.fetchAdminData();
+                    
+                    // Re-initialize icons when the view changes
+                    this.$watch('searchQuery', () => this.$nextTick(() => lucide.createIcons()));
+                    this.$watch('currentPage', () => this.$nextTick(() => lucide.createIcons()));
+                    this.$watch('showOnlyDuplicates', () => this.$nextTick(() => lucide.createIcons()));
+                },
+
+                async fetchAdminData() {
+                    this.loading = true;
+                    try {
+                        const params = new URLSearchParams({
+                            action: 'mobilePlan_getAdminData',
+                            email: this.email,
+                            status: this.statusFilter,
+                            includeAuxData: this.requests.length === 0 ? 'true' : 'false' // Only load aux data once
+                        });
+
+                        const response = await fetch(GAS_URL + '?' + params.toString());
+                        const result = await response.json();
+                        
+                        if (result.error || !result.isAdmin) {
+                            alert('Unauthorized access');
+                            window.location.href = 'index.html';
+                            return;
+                        }
+
+                        this.isAuthorized = true;
+                        
+                        if (result.requests) {
+                            const normalizedRequests = result.requests.map(r => ({
+                                ...r,
+                                requestType: String(r.requestType || '').trim().toUpperCase(),
+                                existingOperator: String(r.existingOperator || '').trim().toUpperCase(),
+                                newOperator: String(r.newOperator || '').trim().toUpperCase()
+                            }));
+
+                            // Sort by date descending (latest first)
+                            this.requests = normalizedRequests.sort((a, b) => {
+                                const dateA = new Date(a.updatedAt || a.createdAt);
+                                const dateB = new Date(b.updatedAt || b.createdAt);
+                                return dateB - dateA;
+                            });
+
+                            // Calculate duplicates only if we have all requests or when needed
+                            const mobileCounts = {};
+                            this.requests.forEach(r => {
+                                const m = String(r.existingMobile || '').trim();
+                                const s = String(r.status || '').toUpperCase();
+                                if (m && s !== 'CANCELLED') mobileCounts[m] = (mobileCounts[m] || 0) + 1;
+                            });
+                            this.duplicateMobiles = new Set(
+                                Object.entries(mobileCounts)
+                                    .filter(([m, count]) => count > 1)
+                                    .map(([m]) => m)
+                            );
+                        }
+                        
+                        this.$nextTick(() => {
+                            lucide.createIcons();
+                        });
+                    } catch (e) {
+                        console.error(e);
+                        alert('Failed to load admin data');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                openSimModal(req) {
+                    this.selectedRequest = req;
+                    this.simNumber = req.simNumber || req.simnumber || '';
+                    // Check multiple possible key variations from backend
+                    this.upCode = req.upCode || req.upcode || req.upcCode || '';
+                    const rawExpiry = req.upcExpiry || req.upcexpiry || req.upceXpiry || '';
+                    this.upcExpiry = rawExpiry ? rawExpiry.split('T')[0] : '';
+                    
+                    this.simError = '';
+                    this.upCodeError = '';
+                    this.showSimModal = true;
+                },
+
+                validateSimFormat(sim) {
+                    if (!sim) return true;
+                    // 20 characters: 8991 + 15 digits + 1 alphanumeric
+                    const regex = /^8991\d{15}[a-zA-Z0-9]$/;
+                    return regex.test(sim);
+                },
+
+                validateUpCode(code) {
+                    if (!code) return true;
+                    // 8 characters: 2 letters + 6 digits
+                    const regex = /^[a-zA-Z]{2}\d{6}$/;
+                    return regex.test(code);
+                },
+
+                async saveSimNumber() {
+                    this.simError = '';
+                    this.upCodeError = '';
+                    const sim = this.simNumber.trim();
+                    const upCode = this.upCode.trim();
+                    const upcExpiry = this.upcExpiry;
+
+                    if (!sim) {
+                        this.simError = 'SIM number is mandatory.';
+                        return;
+                    }
+
+                    if (upCode && !upcExpiry) {
+                        this.upCodeError = 'UPC Expiry is mandatory when UPCode is provided.';
+                        return;
+                    }
+
+                    if (upcExpiry && !upCode) {
+                        this.upCodeError = 'UPCode is mandatory when UPC Expiry is provided.';
+                        return;
+                    }
+
+                    if (sim.length !== 20) {
+                        this.simError = 'SIM number must be exactly 20 characters.';
+                        return;
+                    }
+
+                    if (sim && !this.validateSimFormat(sim)) {
+                        if (!confirm('The SIM number does not match the standard format (8991 + 15 digits + 1 alphanumeric). Do you want to save it anyway?')) {
+                            return;
+                        }
+                    }
+
+                    if (upCode && !this.validateUpCode(upCode)) {
+                        this.upCodeError = 'UPCode must be 2 letters followed by 6 digits (e.g., XY123456).';
+                        return;
+                    }
+
+                    // Check for duplicate SIM in local data first
+                    if (sim) {
+                        const isDuplicate = this.requests.some(r => r.simNumber === sim && r.requestId !== this.selectedRequest.requestId);
+                        if (isDuplicate) {
+                            this.simError = 'This SIM number is already assigned to another request.';
+                            return;
+                        }
+                    }
+
+                    // Check if this mobile number already has a SIM assigned in another request
+                    if (this.selectedRequest.existingMobile && sim) {
+                        const mobileWithSim = this.requests.find(r => 
+                            r.existingMobile === this.selectedRequest.existingMobile && 
+                            r.simNumber && 
+                            r.requestId !== this.selectedRequest.requestId
+                        );
+                        if (mobileWithSim) {
+                            this.simError = `Mobile ${this.selectedRequest.existingMobile} already has a SIM (Request: ${mobileWithSim.requestId}).`;
+                            return;
+                        }
+                    }
+
+                    this.loading = true;
+                    try {
+                        const response = await fetch(GAS_URL, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                action: 'mobilePlan_updateSimNumber',
+                                requestId: this.selectedRequest.requestId,
+                                simNumber: sim,
+                                upCode: upCode,
+                                upcExpiry: this.upcExpiry,
+                                email: this.email
+                            })
+                        });
+                        const result = await response.json();
+                        if (result.error) throw new Error(result.error);
+
+                        // Smart Refresh: Update local data
+                        const index = this.requests.findIndex(r => r.requestId === this.selectedRequest.requestId);
+                        if (index !== -1) {
+                            this.requests[index] = {
+                                ...this.requests[index],
+                                simNumber: sim,
+                                upCode: upCode,
+                                upcExpiry: upcExpiry,
+                                status: 'Sim Delivered',
+                                updatedAt: new Date().toISOString()
+                            };
+                        }
+
+                        this.showSimModal = false;
+                        alert('Request details updated successfully.');
+                    } catch (e) {
+                        alert(e.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async deleteRequest(requestId) {
+                    if (!confirm('Are you sure you want to delete this request?')) return;
+
+                    this.loading = true;
+                    try {
+                        const response = await fetch(GAS_URL, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                action: 'mobilePlan_deleteRequest',
+                                requestId: requestId,
+                                email: this.email
+                            })
+                        });
+                        const result = await response.json();
+                        if (result.error) throw new Error(result.error);
+
+                        // Smart Refresh: Remove from local data
+                        this.requests = this.requests.filter(r => r.requestId !== requestId);
+                        alert('Request deleted successfully.');
+                    } catch (e) {
+                        alert(e.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async cancelRequest(requestId) {
+                    if (!confirm('Are you sure you want to mark this request as CANCELLED? It will be excluded from all dashboard metrics and the mobile number will be released for new applications.')) return;
+
+                    this.loading = true;
+                    try {
+                        const response = await fetch(GAS_URL, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                action: 'mobilePlan_cancelRequest',
+                                requestId: requestId,
+                                email: this.email
+                            })
+                        });
+                        const result = await response.json();
+                        if (result.error) throw new Error(result.error);
+
+                        // Smart Refresh: Update local data
+                        const index = this.requests.findIndex(r => r.requestId === requestId);
+                        if (index !== -1) {
+                            this.requests[index] = {
+                                ...this.requests[index],
+                                status: 'CANCELLED',
+                                updatedAt: new Date().toISOString()
+                            };
+                        }
+                        alert('Request marked as CANCELLED successfully.');
+                    } catch (e) {
+                        alert(e.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                toggleSort(key) {
+                    if (this.sortKey === key) {
+                        this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        this.sortKey = key;
+                        this.sortOrder = 'asc';
+                    }
+                    this.currentPage = 1;
+                    this.$nextTick(() => lucide.createIcons());
+                },
+
+                get filteredRequests() {
+                    let filtered = this.requests;
+
+                    if (this.showOnlyDuplicates) {
+                        filtered = filtered.filter(r => {
+                            const m = String(r.existingMobile || '').trim();
+                            return m && this.duplicateMobiles.has(m);
+                        });
+                    }
+
+                    if (this.searchQuery) {
+                        const q = this.searchQuery.toLowerCase();
+                        filtered = filtered.filter(r => 
+                            (String(r.aadhaarName || '')).toLowerCase().includes(q) ||
+                            (String(r.existingMobile || '')).toLowerCase().includes(q) ||
+                            (String(r.billingUid || '')).toLowerCase().includes(q) ||
+                            (String(r.billingName || '')).toLowerCase().includes(q) ||
+                            (String(r.email || '')).toLowerCase().includes(q) ||
+                            (String(r.simNumber || '')).toLowerCase().includes(q) ||
+                            (String(r.upCode || '')).toLowerCase().includes(q)
+                        );
+                    }
+
+                    // Expiry Date Filter
+                    if (this.expiryFilterDays !== null && this.expiryFilterDays !== '') {
+                        const now = new Date();
+                        const limit = new Date();
+                        limit.setDate(now.getDate() + parseInt(this.expiryFilterDays));
+                        
+                        filtered = filtered.filter(r => {
+                            if (!r.expiryDate) return false;
+                            const exp = new Date(r.expiryDate);
+                            return exp >= now && exp <= limit;
+                        });
+                    }
+
+                    // UPC Expiry Filter
+                    if (this.upcExpiryFilterDays !== null && this.upcExpiryFilterDays !== '') {
+                        const now = new Date();
+                        const limit = new Date();
+                        limit.setDate(now.getDate() + parseInt(this.upcExpiryFilterDays));
+                        
+                        filtered = filtered.filter(r => {
+                            if (!r.upcExpiry) return false;
+                            const exp = new Date(r.upcExpiry);
+                            return exp >= now && exp <= limit;
+                        });
+                    }
+
+                    // Apply Sorting
+                    const key = this.sortKey;
+                    const order = this.sortOrder === 'asc' ? 1 : -1;
+
+                    filtered.sort((a, b) => {
+                        let valA, valB;
+
+                        switch (key) {
+                            case 'date':
+                                valA = new Date(a.updatedAt || a.createdAt).getTime();
+                                valB = new Date(b.updatedAt || b.createdAt).getTime();
+                                break;
+                            case 'name':
+                                valA = (a.aadhaarName || '').toLowerCase();
+                                valB = (b.aadhaarName || '').toLowerCase();
+                                break;
+                            case 'mobile':
+                                valA = String(a.existingMobile || '').trim();
+                                valB = String(b.existingMobile || '').trim();
+                                break;
+                            case 'operator':
+                                valA = (a.newOperator || '').toLowerCase();
+                                valB = (b.newOperator || '').toLowerCase();
+                                break;
+                            case 'status':
+                                valA = (a.status || '').toLowerCase();
+                                valB = (b.status || '').toLowerCase();
+                                break;
+                            default:
+                                return 0;
+                        }
+
+                        if (valA < valB) return -1 * order;
+                        if (valA > valB) return 1 * order;
+                        return 0;
+                    });
+
+                    return filtered;
+                },
+
+                get totalPages() {
+                    return Math.ceil(this.filteredRequests.length / this.pageSize);
+                },
+
+                get paginatedRequests() {
+                    const start = (this.currentPage - 1) * this.pageSize;
+                    const end = start + this.pageSize;
+                    return this.filteredRequests.slice(start, end);
+                },
+
+                prevPage() {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        window.scrollTo(0, 0);
+                    }
+                },
+
+                nextPage() {
+                    if (this.currentPage < this.totalPages) {
+                        this.currentPage++;
+                        window.scrollTo(0, 0);
+                    }
+                },
+
+                logout() {
+                    localStorage.removeItem('portal_email');
+                    window.location.href = 'index.html';
+                },
+
+                formatDate(iso) {
+                    if (!iso) return '';
+                    const date = new Date(iso);
+                    if (isNaN(date.getTime())) return iso;
+                    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                },
+
+                formatCalendarDate(dateStr) {
+                    if (!dateStr) return '-';
+                    // If it's an ISO string (contains T), extract the date part
+                    if (dateStr.includes('T')) {
+                        dateStr = dateStr.split('T')[0];
+                    }
+                    const parts = dateStr.split('-');
+                    if (parts.length === 3) {
+                        const year = parseInt(parts[0]);
+                        const month = parseInt(parts[1]) - 1;
+                        const day = parseInt(parts[2]);
+                        const date = new Date(year, month, day);
+                        return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                    }
+                    return dateStr;
+                }
+            };
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900" x-data="allRequestsPage()">
+
+    <!-- Header -->
+    <header class="bg-white border-b sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <a href="admin-dashboard.html" class="p-2 hover:bg-gray-100 rounded-lg transition-colors mr-2" title="Back to Dashboard">
+                    <i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i>
+                </a>
+                <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">B</div>
+                <h1 class="font-bold text-lg tracking-tight">All Requests</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <button @click="fetchAdminData()" :disabled="loading" class="flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                    <i data-lucide="refresh-cw" class="w-4 h-4" :class="loading ? 'animate-spin' : ''"></i>
+                    Refresh
+                </button>
+                <span class="text-sm text-gray-500 hidden sm:inline" x-text="email"></span>
+                <button @click="logout()" class="text-gray-500 hover:text-red-600 transition-colors">
+                    <i data-lucide="log-out" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4 md:p-8 space-y-6" x-show="isAuthorized" x-cloak>
+        
+        <!-- Search & Info -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-900">Request History</h2>
+                <p class="text-sm text-gray-500" x-text="'Showing ' + filteredRequests.length + ' total records'"></p>
+            </div>
+                <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-1 shadow-sm">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase">Status</span>
+                        <select x-model="statusFilter" @change="currentPage = 1; fetchAdminData()" 
+                                class="border-none focus:ring-0 text-sm p-0 font-bold text-gray-700 bg-transparent cursor-pointer">
+                            <option value="ALL">All Status</option>
+                            <option value="APPLIED">Applied</option>
+                            <option value="PENDING">Pending</option>
+                            <option value="SIM DELIVERED">Delivered</option>
+                            <option value="PROCESSED">Processed</option>
+                            <option value="CANCELLED">Cancelled</option>
+                        </select>
+                    </div>
+                <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-1 shadow-sm">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase">Plan Exp (Days)</span>
+                    <input type="number" x-model="expiryFilterDays" @input="currentPage = 1" placeholder="X" 
+                           class="w-12 border-none focus:ring-0 text-sm p-0 text-center font-bold text-blue-600">
+                </div>
+                <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-1 shadow-sm">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase">UPC Exp (Days)</span>
+                    <input type="number" x-model="upcExpiryFilterDays" @input="currentPage = 1" placeholder="X" 
+                           class="w-12 border-none focus:ring-0 text-sm p-0 text-center font-bold text-orange-600">
+                </div>
+                <button @click="showOnlyDuplicates = !showOnlyDuplicates; currentPage = 1" 
+                        :class="showOnlyDuplicates ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'"
+                        class="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all shadow-sm whitespace-nowrap">
+                    <i data-lucide="copy" class="w-4 h-4"></i>
+                    <span x-text="showOnlyDuplicates ? 'Showing Duplicates' : 'Show Duplicates'"></span>
+                    <span x-show="showOnlyDuplicates" class="bg-orange-600 text-white text-[10px] px-1.5 py-0.5 rounded-full" x-text="duplicateMobiles.size"></span>
+                </button>
+                <div class="relative max-w-md w-full">
+                    <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                    <input type="text" x-model="searchQuery" @input="currentPage = 1" placeholder="Search by name, mobile, UID, SIM..." 
+                           class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm shadow-sm">
+                </div>
+            </div>
+        </div>
+
+        <!-- Table -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-50 text-[10px] uppercase font-bold text-gray-500 tracking-wider">
+                            <th class="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors group" @click="toggleSort('date')">
+                                <div class="flex items-center gap-1">
+                                    Date & Time
+                                    <i data-lucide="arrow-up-down" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" :class="sortKey === 'date' ? 'opacity-100 text-blue-600' : ''"></i>
+                                </div>
+                            </th>
+                            <th class="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors group" @click="toggleSort('name')">
+                                <div class="flex items-center gap-1">
+                                    User Details
+                                    <i data-lucide="arrow-up-down" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" :class="sortKey === 'name' ? 'opacity-100 text-blue-600' : ''"></i>
+                                </div>
+                            </th>
+                            <th class="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors group" @click="toggleSort('mobile')">
+                                <div class="flex items-center gap-1">
+                                    Mobile No.
+                                    <i data-lucide="arrow-up-down" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" :class="sortKey === 'mobile' ? 'opacity-100 text-blue-600' : ''"></i>
+                                </div>
+                            </th>
+                            <th class="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors group" @click="toggleSort('operator')">
+                                <div class="flex items-center gap-1">
+                                    Operator Shift
+                                    <i data-lucide="arrow-up-down" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" :class="sortKey === 'operator' ? 'opacity-100 text-blue-600' : ''"></i>
+                                </div>
+                            </th>
+                            <th class="px-6 py-4">Exp. Date</th>
+                            <th class="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors group" @click="toggleSort('status')">
+                                <div class="flex items-center gap-1">
+                                    Status / SIM
+                                    <i data-lucide="arrow-up-down" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" :class="sortKey === 'status' ? 'opacity-100 text-blue-600' : ''"></i>
+                                </div>
+                            </th>
+                            <th class="px-6 py-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <template x-for="req in paginatedRequests" :key="req.requestId">
+                            <tr class="hover:bg-gray-50 transition-colors text-sm">
+                                <td class="px-6 py-4 text-gray-500 whitespace-nowrap" x-text="formatDate(req.updatedAt || req.createdAt)"></td>
+                                <td class="px-6 py-4">
+                                    <div class="font-bold text-gray-900" x-text="req.aadhaarName"></div>
+                                    <div class="text-xs text-gray-500" x-text="req.email"></div>
+                                </td>
+                                <td class="px-6 py-4 font-mono font-medium" 
+                                    :class="showOnlyDuplicates ? 'text-orange-600 font-bold' : 'text-gray-900'"
+                                    x-text="req.existingMobile"></td>
+                                <td class="px-6 py-4">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs font-bold text-gray-400" x-text="req.existingOperator"></span>
+                                        <i data-lucide="arrow-right" class="w-3 h-3 text-gray-300"></i>
+                                        <span class="text-xs font-bold text-blue-600" x-text="req.newOperator"></span>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4 text-xs font-medium text-gray-600" x-text="formatCalendarDate(req.expiryDate)"></td>
+                                <td class="px-6 py-4">
+                                    <div class="flex flex-col gap-1">
+                                        <span :class="{
+                                            'bg-blue-100 text-blue-700': req.status === 'Applied',
+                                            'bg-green-100 text-green-700': req.status === 'Processed' || req.status === 'Sim Delivered',
+                                            'bg-yellow-100 text-yellow-700': req.status === 'Pending',
+                                            'bg-red-100 text-red-700': req.status === 'CANCELLED'
+                                        }" class="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider w-fit" x-text="req.status"></span>
+                                        <div x-show="req.simNumber" class="text-[10px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200" x-text="'SIM: ' + req.simNumber"></div>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4 text-right">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <!-- SIM Action -->
+                                        <button @click="openSimModal(req)" 
+                                                class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Manage SIM">
+                                            <i data-lucide="credit-card" class="w-4 h-4"></i>
+                                        </button>
+                                        
+                                        <!-- Cancel Action (Only if not already cancelled) -->
+                                        <button x-show="req.status !== 'CANCELLED'" 
+                                                @click="cancelRequest(req.requestId)" 
+                                                class="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors" title="Cancel Request">
+                                            <i data-lucide="ban" class="w-4 h-4"></i>
+                                        </button>
+
+                                        <!-- Delete Action (Hidden if Sim Delivered or Processed) -->
+                                        <button x-show="req.status !== 'Sim Delivered' && req.status !== 'Processed'" 
+                                                @click="deleteRequest(req.requestId)" 
+                                                class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete Request">
+                                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                        </button>
+
+                                        <!-- View Action (Always visible) -->
+                                        <button @click="selectedRequest = req; showViewModal = true; $nextTick(() => lucide.createIcons())" 
+                                                class="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors" title="View Details">
+                                            <i data-lucide="eye" class="w-4 h-4"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State -->
+            <div x-show="filteredRequests.length === 0" class="p-20 text-center space-y-4">
+                <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-400">
+                    <i data-lucide="search-x" class="w-8 h-8"></i>
+                </div>
+                <p class="text-gray-500 font-medium">No requests found matching your search.</p>
+            </div>
+
+            <!-- Pagination Controls -->
+            <div x-show="totalPages > 1" class="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div class="text-sm text-gray-500">
+                    Showing <span class="font-medium text-gray-900" x-text="((currentPage - 1) * pageSize) + 1"></span> 
+                    to <span class="font-medium text-gray-900" x-text="Math.min(currentPage * pageSize, filteredRequests.length)"></span> 
+                    of <span class="font-medium text-gray-900" x-text="filteredRequests.length"></span> results
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="prevPage()" :disabled="currentPage === 1" 
+                            class="px-4 py-2 border rounded-xl text-sm font-medium hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
+                        <i data-lucide="chevron-left" class="w-4 h-4"></i> Previous
+                    </button>
+                    <div class="flex items-center gap-1 px-2">
+                        <template x-for="p in totalPages">
+                            <button x-show="p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1"
+                                    @click="currentPage = p; window.scrollTo(0, 0)"
+                                    :class="currentPage === p ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'"
+                                    class="w-8 h-8 rounded-lg border text-xs font-bold transition-all"
+                                    x-text="p"></button>
+                        </template>
+                    </div>
+                    <button @click="nextPage()" :disabled="currentPage === totalPages" 
+                            class="px-4 py-2 border rounded-xl text-sm font-medium hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
+                        Next <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-4">
+        <div class="animate-spin border-4 border-blue-600 border-t-transparent rounded-full w-12 h-12"></div>
+        <p class="text-gray-600 font-medium">Loading Records...</p>
+    </div>
+
+    <!-- View Modal -->
+    <div x-show="showViewModal" 
+         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         x-cloak>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden" @click.away="showViewModal = false">
+            <div class="p-6 border-b flex items-center justify-between bg-gray-900 text-white">
+                <h3 class="text-lg font-bold">Request Details</h3>
+                <button @click="showViewModal = false" class="hover:bg-white/20 p-1 rounded-lg transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[80vh]">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Status & SIM -->
+                    <div class="md:col-span-2 flex items-center justify-between bg-gray-50 p-4 rounded-xl border">
+                        <div class="space-y-1">
+                            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Current Status</div>
+                            <span :class="{
+                                'bg-blue-100 text-blue-700': selectedRequest?.status === 'Applied',
+                                'bg-green-100 text-green-700': selectedRequest?.status === 'Processed' || selectedRequest?.status === 'Sim Delivered',
+                                'bg-yellow-100 text-yellow-700': selectedRequest?.status === 'Pending'
+                            }" class="px-3 py-1 rounded-full text-xs font-bold uppercase" x-text="selectedRequest?.status"></span>
+                        </div>
+                        <div x-show="selectedRequest?.simNumber" class="text-right space-y-1">
+                            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Assigned SIM</div>
+                            <div class="font-mono font-bold text-blue-600" x-text="selectedRequest?.simNumber"></div>
+                        </div>
+                    </div>
+
+                    <!-- User Info -->
+                    <div class="space-y-4">
+                        <h4 class="text-xs font-bold text-blue-600 uppercase tracking-widest border-b pb-1">User Information</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase font-bold">Aadhaar Name</div>
+                                <div class="font-medium" x-text="selectedRequest?.aadhaarName"></div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase font-bold">Email Address</div>
+                                <div class="font-medium" x-text="selectedRequest?.email"></div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase font-bold">Date of Birth</div>
+                                <div class="font-medium" x-text="selectedRequest?.dob"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Connection Info -->
+                    <div class="space-y-4">
+                        <h4 class="text-xs font-bold text-blue-600 uppercase tracking-widest border-b pb-1">Connection Details</h4>
+                        <div class="space-y-3">
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase font-bold">Mobile Number</div>
+                                <div class="font-medium" x-text="selectedRequest?.existingMobile || 'New Connection'"></div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase font-bold">Operator Shift</div>
+                                <div class="font-medium" x-text="selectedRequest?.existingOperator + ' → ' + selectedRequest?.newOperator"></div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase font-bold">Billing Centre</div>
+                                <div class="font-medium" x-text="selectedRequest?.billingName + ' (' + selectedRequest?.billingUid + ')'"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Other Info -->
+                    <div class="md:col-span-2 grid grid-cols-2 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-xl border border-dashed">
+                        <div>
+                            <div class="text-[10px] text-gray-400 uppercase font-bold">Pincode</div>
+                            <div class="font-medium" x-text="selectedRequest?.pincode"></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-gray-400 uppercase font-bold">Plan Expiry</div>
+                            <div class="font-medium" x-text="formatCalendarDate(selectedRequest?.expiryDate)"></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-gray-400 uppercase font-bold">2nd Mobile (OTP)</div>
+                            <div class="font-medium" x-text="selectedRequest?.secondaryOtpMobile"></div>
+                        </div>
+                        <div x-show="selectedRequest?.upCode || selectedRequest?.upcode || selectedRequest?.upcCode">
+                            <div class="text-[10px] text-gray-400 uppercase font-bold">UPCode</div>
+                            <div class="font-medium text-blue-600 font-mono" x-text="selectedRequest?.upCode || selectedRequest?.upcode || selectedRequest?.upcCode"></div>
+                        </div>
+                        <div x-show="selectedRequest?.upcExpiry || selectedRequest?.upcexpiry || selectedRequest?.upceXpiry">
+                            <div class="text-[10px] text-gray-400 uppercase font-bold">UPC Expiry</div>
+                            <div class="font-medium text-orange-600" x-text="formatCalendarDate(selectedRequest?.upcExpiry || selectedRequest?.upcexpiry || selectedRequest?.upceXpiry)"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t bg-gray-50 flex justify-end">
+                <button @click="showViewModal = false" class="px-6 py-2 bg-gray-900 text-white rounded-xl font-bold hover:bg-gray-800 transition-all">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SIM Modal -->
+    <div x-show="showSimModal" 
+         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         x-cloak>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" @click.away="showSimModal = false">
+            <div class="p-6 border-b flex items-center justify-between bg-blue-600 text-white">
+                <h3 class="text-lg font-bold">Manage SIM Number</h3>
+                <button @click="showSimModal = false" class="hover:bg-white/20 p-1 rounded-lg transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="bg-blue-50 p-4 rounded-xl space-y-1">
+                    <div class="text-xs font-bold text-blue-600 uppercase tracking-wider">Request For</div>
+                    <div class="font-bold text-gray-900" x-text="selectedRequest?.aadhaarName"></div>
+                    <div class="text-sm text-gray-600" x-text="selectedRequest?.existingMobile"></div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4">
+                    <div class="space-y-2">
+                        <label class="block text-sm font-bold text-gray-700">
+                            SIM Number (20 Characters) <span class="text-red-500">*</span>
+                        </label>
+                        <input type="text" x-model="simNumber" maxlength="20"
+                               class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-lg tracking-widest"
+                               placeholder="Enter 20-digit SIM number...">
+                        <p x-show="simError" class="text-xs text-red-600 font-medium" x-text="simError"></p>
+                        <p class="text-[10px] text-gray-400">Format: 8991 + 15 digits + 1 alphanumeric</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-2">
+                            <label class="block text-sm font-bold text-gray-700">UPCode</label>
+                            <input type="text" x-model="upCode" maxlength="8"
+                                   class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-lg uppercase tracking-widest"
+                                   placeholder="XY123456">
+                            <p x-show="upCodeError" class="text-xs text-red-600 font-medium" x-text="upCodeError"></p>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-bold text-gray-700">UPC Expiry</label>
+                            <input type="date" x-model="upcExpiry"
+                                   class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm">
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-gray-400">UPCode: 2 letters + 6 digits</p>
+                </div>
+
+                <div class="pt-4 flex gap-3">
+                    <button @click="showSimModal = false" class="flex-1 px-4 py-3 rounded-xl border border-gray-200 font-bold text-gray-600 hover:bg-gray-50 transition-all">
+                        Cancel
+                    </button>
+                    <button @click="saveSimNumber()" :disabled="loading" class="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                        <template x-if="!loading">
+                            <div class="flex items-center gap-2">
+                                <i data-lucide="save" class="w-4 h-4"></i>
+                                <span>Save SIM</span>
+                            </div>
+                        </template>
+                        <template x-if="loading">
+                            <div class="flex items-center gap-2">
+                                <span class="animate-spin border-2 border-white border-t-transparent rounded-full w-4 h-4"></span>
+                                <span>Saving...</span>
+                            </div>
+                        </template>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

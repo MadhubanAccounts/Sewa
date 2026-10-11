@@ -1,0 +1,6 @@
+{
+  "name": "Audit Portal",
+  "requestFramePermissions": [],
+  "description": "A comprehensive Audit and Compliance Portal for synchronizing audit status, tracking vouching statistics, and generating audit readiness reports.",
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
