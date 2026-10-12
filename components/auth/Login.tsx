@@ -11,12 +11,15 @@ import { ICONS } from '../dashboard/modules';
 import { applyTheme } from '../../utils/theme';
 import { WorkstationSkeleton } from '../common/WorkstationSkeleton';
 import { SkeletonLoader } from '../ui/SkeletonLoader';
+import { ThemeToggle } from '../layout/ThemeToggle';
+import { useTheme } from '../../hooks/useTheme';
 import { base64urlToBuffer, bufferToBase64url, isBiometricsAvailable, isWebAuthnPermitted, getLocalPasskeyUser, clearLocalPasskeyUser, LocalPasskeyUser } from '../../utils/webauthn';
 
 // Global variable to persist GSI initialization status across react component re-mounts
 let gsiInitialized = false;
 
 const Login: React.FC = () => {
+    const { theme: appTheme } = useTheme();
     const [mobileNumber, setMobileNumber] = useState('');
     const [otp, setOtp] = useState('');
     const [step, setStep] = useState(1);
@@ -421,11 +424,16 @@ const Login: React.FC = () => {
                         (window as any).gsi_initialized = true;
                     }
 
+                    // Determine dark mode awareness for Google button
+                    const isDarkTheme = appTheme === 'dark' || 
+                        (appTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ||
+                        document.documentElement.classList.contains('dark');
+
                     // Render button inside the container
                     google.accounts.id.renderButton(
                         googleBtnRef.current,
                         { 
-                            theme: 'outline', 
+                            theme: isDarkTheme ? 'filled_black' : 'outline', 
                             size: 'large', 
                             width: 340,
                             text: 'signin_with',
@@ -454,7 +462,7 @@ const Login: React.FC = () => {
             isMounted = false;
             if (timer) clearTimeout(timer);
         };
-    }, [step, isGoogleLoaded, isIframe, loginMethod]);
+    }, [step, isGoogleLoaded, isIframe, loginMethod, appTheme]);
 
     useEffect(() => {
         if (miniAppToken || step !== 1 || loginMethod !== 'google') {
@@ -827,17 +835,23 @@ const Login: React.FC = () => {
     
     if (miniAppToken) {
         return (
-            <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-950 text-white font-sans">
-                <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6 animate-in fade-in zoom-in duration-300">
+            <div 
+                className="min-h-screen flex items-center justify-center p-4 bg-[var(--background)] text-[var(--foreground)] font-sans transition-colors duration-300"
+                style={{ 
+                    backgroundColor: 'var(--background)',
+                    backgroundImage: 'var(--background-gradient)'
+                }}
+            >
+                <div className="w-full max-w-md bg-[var(--card-background)] border border-[var(--border)] rounded-3xl p-6 shadow-2xl space-y-6 animate-in fade-in zoom-in duration-300">
                     {/* Header */}
                     <div className="text-center space-y-2">
                         <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
                             <Shield className="w-7 h-7 text-white" />
                         </div>
-                        <h2 className="text-xl font-extrabold tracking-tight text-white mt-3">
+                        <h2 className="text-xl font-extrabold tracking-tight text-[var(--foreground)] mt-3">
                             {branding.name} Verification
                         </h2>
-                        <p className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">
+                        <p className="text-xs text-[var(--foreground-muted)] font-semibold uppercase tracking-widest">
                             Secure Handshake Protocol
                         </p>
                     </div>
@@ -846,7 +860,7 @@ const Login: React.FC = () => {
                     {miniAppVerifiedStatus === 'PENDING' && (
                         <div className="space-y-6">
                             {tgUserInfo ? (
-                                <div className="p-4 bg-zinc-800/50 rounded-2xl border border-zinc-800 flex items-center gap-3">
+                                <div className="p-4 bg-[var(--card-inset-background)] rounded-2xl border border-[var(--border)] flex items-center gap-3">
                                     {tgUserInfo.photoUrl ? (
                                         <img 
                                             src={tgUserInfo.photoUrl} 
@@ -860,20 +874,20 @@ const Login: React.FC = () => {
                                         </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <h3 className="text-sm font-bold text-white truncate">
+                                        <h3 className="text-sm font-bold text-[var(--foreground)] truncate">
                                             {tgUserInfo.firstName} {tgUserInfo.lastName}
                                         </h3>
-                                        <p className="text-xs text-zinc-400 truncate">
+                                        <p className="text-xs text-[var(--foreground-muted)] truncate">
                                             @{tgUserInfo.username || 'telegram_user'} (ID: {tgUserInfo.id})
                                         </p>
                                     </div>
-                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
+                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
                                         Active Bot Chat
                                     </span>
                                 </div>
                             ) : (
-                                <div className="p-4 bg-zinc-800/50 rounded-2xl border border-zinc-800 text-center space-y-4">
-                                    <p className="text-xs text-zinc-300 leading-relaxed">
+                                <div className="p-4 bg-[var(--card-inset-background)] rounded-2xl border border-[var(--border)] text-center space-y-4">
+                                    <p className="text-xs text-[var(--foreground)] leading-relaxed">
                                         We couldn't automatically resolve your Telegram session details. Please enter your Telegram User ID manually below to authorize sign-in:
                                     </p>
                                     
@@ -883,7 +897,7 @@ const Login: React.FC = () => {
                                             type="text"
                                             placeholder="Enter Telegram User ID (e.g. 12345678)"
                                             defaultValue={tgUserInfo?.id || ''}
-                                            className="flex-1 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-colors"
+                                            className="flex-1 px-3 py-2 bg-[var(--card-background)] border border-[var(--border)] rounded-xl text-xs text-[var(--foreground)] placeholder-[var(--placeholder-foreground)] focus:outline-none focus:border-blue-500 transition-colors"
                                         />
                                         <button
                                             type="button"
@@ -925,10 +939,10 @@ const Login: React.FC = () => {
                             )}
 
                             <div className="text-center space-y-1">
-                                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">
+                                <span className="text-[10px] text-[var(--foreground-muted)] font-bold uppercase tracking-wider block">
                                     Token Verification ID
                                 </span>
-                                <code className="text-xs bg-zinc-950 px-2.5 py-1 rounded-md text-blue-400 font-mono border border-zinc-800">
+                                <code className="text-xs bg-[var(--card-inset-background)] px-2.5 py-1 rounded-md text-blue-500 font-mono border border-[var(--border)]">
                                     {miniAppToken}
                                 </code>
                             </div>
@@ -937,16 +951,16 @@ const Login: React.FC = () => {
 
                     {miniAppVerifiedStatus === 'SUCCESS' && (
                         <div className="space-y-5 text-center py-4 animate-in fade-in duration-300">
-                            <div className="mx-auto w-12 h-12 rounded-full bg-green-500/10 flex items-center justify-center text-green-400 border border-green-500/20">
+                            <div className="mx-auto w-12 h-12 rounded-full bg-green-500/10 flex items-center justify-center text-green-500 border border-green-500/20">
                                 <CheckCircle2 className="w-6 h-6 animate-bounce" />
                             </div>
                             <div className="space-y-1.5">
-                                <h3 className="text-md font-bold text-white">✓ Authentication Successful</h3>
-                                <p className="text-xs text-zinc-400 leading-relaxed max-w-xs mx-auto font-medium">
+                                <h3 className="text-md font-bold text-[var(--foreground)]">✓ Authentication Successful</h3>
+                                <p className="text-xs text-[var(--foreground-muted)] leading-relaxed max-w-xs mx-auto font-medium">
                                     Your computer session has been logged in successfully.
                                 </p>
                             </div>
-                            <p className="text-[10px] text-zinc-500 animate-pulse font-bold">
+                            <p className="text-[10px] text-[var(--foreground-muted)] animate-pulse font-bold">
                                 This window will close automatically
                             </p>
                         </div>
@@ -954,12 +968,12 @@ const Login: React.FC = () => {
 
                     {miniAppVerifiedStatus === 'ERROR' && (
                         <div className="space-y-5 text-center py-4 animate-in fade-in duration-300">
-                            <div className="mx-auto w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-400 border border-red-500/20">
+                            <div className="mx-auto w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 border border-red-500/20">
                                 <AlertCircle className="w-6 h-6" />
                             </div>
                             <div className="space-y-1.5">
-                                <h3 className="text-md font-bold text-white">Verification Failed</h3>
-                                <p className="text-xs text-red-400 leading-relaxed max-w-xs mx-auto font-medium">
+                                <h3 className="text-md font-bold text-[var(--foreground)]">Verification Failed</h3>
+                                <p className="text-xs text-red-500 leading-relaxed max-w-xs mx-auto font-medium">
                                     {miniAppErrorMessage}
                                 </p>
                             </div>
@@ -971,7 +985,7 @@ const Login: React.FC = () => {
                                         setMiniAppVerifiedStatus('PENDING');
                                         setMiniAppErrorMessage('');
                                     }}
-                                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 duration-150"
+                                    className="px-4 py-2 bg-[var(--secondary-background)] hover:bg-[var(--secondary-hover-background)] text-[var(--secondary-foreground)] border border-[var(--secondary-border)] rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 duration-150"
                                 >
                                     Try Again / Manual Input
                                 </button>
@@ -982,7 +996,7 @@ const Login: React.FC = () => {
                                         const tg = (window as any).Telegram?.WebApp;
                                         if (tg) tg.close();
                                     }}
-                                    className="text-xs text-zinc-500 hover:text-zinc-400 transition-colors"
+                                    className="text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
                                 >
                                     Dismiss
                                 </button>
@@ -995,8 +1009,19 @@ const Login: React.FC = () => {
     }
 
     return (
-        <div className="min-h-[100dvh] flex items-center justify-center p-2 sm:p-4 bg-[var(--background)] py-2 sm:py-6 overflow-y-auto sm:overflow-y-visible">
-            <div className="w-full max-w-4xl flex flex-col sm:flex-row items-center">
+        <div 
+            className="min-h-[100dvh] flex flex-col justify-between p-2 sm:p-4 bg-[var(--background)] py-2 sm:py-6 overflow-y-auto sm:overflow-y-visible transition-colors duration-300"
+            style={{ 
+                backgroundColor: 'var(--background)',
+                backgroundImage: 'var(--background-gradient)'
+            }}
+        >
+            {/* Top Bar with Theme Toggle */}
+            <div className="w-full max-w-4xl mx-auto flex justify-end items-center px-3 py-1">
+                <ThemeToggle />
+            </div>
+
+            <div className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row items-center my-auto">
                 {/* --- Branding Column --- */}
                 <div className="w-full sm:w-1/2 lg:w-2/5 p-3 sm:p-6 lg:p-8 flex flex-col items-center justify-center text-center">
                     <div className="mx-auto bg-[var(--primary-color)] rounded-full p-2 sm:p-3 w-16 h-16 sm:w-24 sm:h-24 flex items-center justify-center mb-2 sm:mb-4 ring-2 sm:ring-4 ring-[var(--card-background)] shadow-lg transition-colors duration-500 overflow-hidden">
@@ -1039,7 +1064,7 @@ const Login: React.FC = () => {
                     {isBrandingLoading ? (
                         <WorkstationSkeleton type="form" />
                     ) : (
-                        <Card className="shadow-2xl rounded-2xl animate-in fade-in zoom-in duration-500 p-4 sm:p-6">
+                        <Card className="shadow-2xl rounded-2xl animate-in fade-in zoom-in duration-500 p-4 sm:p-6 border border-[var(--border)]">
                             {step === 1 && (
                                 <div className="space-y-4 sm:space-y-6">
                                     {/* 1-Tap Quick Passkey Login Card (if previously enrolled on this device) */}
@@ -1083,7 +1108,7 @@ const Login: React.FC = () => {
                                                     setMobileNumber('');
                                                     toast('Device memory cleared. You can now type any mobile number.', 'info');
                                                 }}
-                                                className="text-[var(--primary)] hover:underline font-medium cursor-pointer"
+                                                className="text-[var(--primary-color)] hover:underline font-medium cursor-pointer"
                                             >
                                                 Switch account / Clear
                                             </button>
@@ -1092,18 +1117,18 @@ const Login: React.FC = () => {
                                 )}
 
                                     {/* Segmented Controller / Method Selector */}
-                                    <div className="flex p-1 bg-[var(--foreground-muted)]/5 rounded-xl border border-[var(--foreground-muted)]/10">
+                                    <div className="flex p-1 bg-[var(--card-inset-background)] rounded-xl border border-[var(--border)]">
                                         <button
                                             type="button"
                                             onClick={() => setLoginMethod('otp')}
-                                            className={`flex-1 py-1.5 sm:py-2 text-xs font-semibold rounded-lg transition-all ${loginMethod === 'otp' ? 'bg-white text-[var(--primary)] shadow-sm dark:bg-[var(--card-background)] dark:text-white' : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)]'}`}
+                                            className={`flex-1 py-1.5 sm:py-2 text-xs font-semibold rounded-lg transition-all ${loginMethod === 'otp' ? 'bg-[var(--card-background)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)]'}`}
                                         >
                                             Mobile / Biometric
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setLoginMethod('google')}
-                                            className={`flex-1 py-1.5 sm:py-2 text-xs font-semibold rounded-lg transition-all ${loginMethod === 'google' ? 'bg-white text-[var(--primary)] shadow-sm dark:bg-[var(--card-background)] dark:text-white' : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)]'}`}
+                                            className={`flex-1 py-1.5 sm:py-2 text-xs font-semibold rounded-lg transition-all ${loginMethod === 'google' ? 'bg-[var(--card-background)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)]'}`}
                                         >
                                             Google Account
                                         </button>
@@ -1186,14 +1211,14 @@ const Login: React.FC = () => {
 
                                     {/* Telegram Pending/Expired View */}
                                     {loginMethod === 'otp' && (telegramStatus === 'PENDING' || telegramStatus === 'EXPIRED') && (
-                                        <div className="p-4 sm:p-6 bg-gradient-to-tr from-zinc-50/50 to-zinc-100/50 dark:from-zinc-900/50 dark:to-zinc-800/30 rounded-2xl border border-zinc-100 dark:border-zinc-800/80 animate-in fade-in duration-300 max-w-2xl mx-auto">
+                                        <div className="p-4 sm:p-6 bg-[var(--card-inset-background)] rounded-2xl border border-[var(--border)] animate-in fade-in duration-300 max-w-2xl mx-auto shadow-sm">
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
                                                 {/* Left Column: Real-World Telegram Webhook Verification */}
                                                 <div className="space-y-5 flex flex-col justify-between h-full py-2">
                                                     <div className="space-y-4">
                                                         <div className="flex items-center gap-2 text-blue-500">
                                                             <div className="p-1.5 bg-blue-500/10 rounded-lg">
-                                                                <Shield className="w-5 h-5" />
+                                                                <Shield className="w-5 h-5 text-blue-500" />
                                                             </div>
                                                             <h3 className="font-bold text-sm tracking-tight text-[var(--foreground)]">Official Mini App Verification</h3>
                                                         </div>
@@ -1223,7 +1248,7 @@ const Login: React.FC = () => {
                                                             <span>Expires in <strong>{Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}</strong></span>
                                                         </div>
 
-                                                        <div className="border-t border-zinc-100 dark:border-zinc-800/80 pt-3 flex flex-col space-y-1.5">
+                                                        <div className="border-t border-[var(--border)] pt-3 flex flex-col space-y-1.5">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -1401,6 +1426,8 @@ const Login: React.FC = () => {
                     )}
                 </div>
             </div>
+            {/* Bottom spacer to keep content perfectly centered while maintaining top bar */}
+            <div className="w-full max-w-4xl mx-auto px-3 py-1 opacity-0 pointer-events-none select-none h-6" aria-hidden="true" />
         </div>
     );
 };

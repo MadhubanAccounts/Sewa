@@ -22,7 +22,8 @@
         --primary-foreground: #ffffff;
 
         /* Light Theme Palette */
-        --background: linear-gradient(to bottom right, #f8fafc, #e2e8f0); /* slate-50 to slate-200 */
+        --background: #f8fafc; /* slate-50 solid color */
+        --background-gradient: linear-gradient(to bottom right, #f8fafc, #e2e8f0); /* slate-50 to slate-200 */
         --foreground: #0f172a; /* slate-900 */
         --foreground-muted: #475569; /* slate-600 */
         
@@ -125,7 +126,8 @@
         --primary-foreground: #ffffff;
 
         /* Dark Theme Palette */
-        --background: linear-gradient(to bottom right, #020617, #0f172a); /* slate-950 to slate-900 */
+        --background: #020617; /* slate-950 solid color */
+        --background-gradient: linear-gradient(to bottom right, #020617, #0f172a); /* slate-950 to slate-900 */
         --foreground: #f8fafc; /* slate-50 */
         --foreground-muted: #94a3b8; /* slate-400 */
 
@@ -242,6 +244,24 @@
       }
       .animate-progress-stripe {
         animation: progress-stripe 1s linear infinite;
+      }
+
+      html {
+        background-color: var(--background);
+        color: var(--foreground);
+        min-height: 100%;
+      }
+
+      html.dark {
+        background-color: #020617;
+        color: #f8fafc;
+      }
+
+      body {
+        background-color: var(--background);
+        background-image: var(--background-gradient);
+        color: var(--foreground);
+        min-height: 100vh;
       }
     </style>
     <script>

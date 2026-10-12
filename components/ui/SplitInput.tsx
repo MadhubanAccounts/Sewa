@@ -132,7 +132,7 @@ export const SplitInput: React.FC<SplitInputProps> = ({ length, value, onChange,
                             else onChange('');
                             inputRefs.current[0]?.current?.focus();
                         }}
-                        className="text-xs text-[var(--primary)] hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                        className="text-xs text-[var(--primary-color)] hover:underline flex items-center gap-1 cursor-pointer font-medium"
                     >
                         Clear / Change
                     </button>
