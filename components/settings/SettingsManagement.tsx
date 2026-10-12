@@ -11,8 +11,9 @@ import { Send, AlertTriangle } from 'lucide-react';
 import { Input } from '../ui/Input';
 import { WorkstationSkeleton } from '../common/WorkstationSkeleton';
 import { SystemMaintenance } from './SystemMaintenance';
+import { EnvironmentFaviconManager } from './EnvironmentFaviconManager';
 
-type Tab = 'branding' | 'backend' | 'maintenance';
+type Tab = 'branding' | 'backend' | 'maintenance' | 'favicons';
 
 interface SettingsManagementProps {
     defaultTab?: Tab;
@@ -121,6 +122,9 @@ const SettingsManagement: React.FC<SettingsManagementProps> = ({ defaultTab = 'b
         if (activeTab === 'maintenance') {
             return <SystemMaintenance />;
         }
+        if (activeTab === 'favicons') {
+            return <EnvironmentFaviconManager />;
+        }
 
         const fields = activeTab === 'branding' ? brandingFields : backendFields;
         const fieldNames = fields.map(f => f.fieldName);
@@ -192,9 +196,10 @@ const SettingsManagement: React.FC<SettingsManagementProps> = ({ defaultTab = 'b
                         <option value="branding">App Branding</option>
                         <option value="backend">Backend Configuration</option>
                         <option value="maintenance">System Maintenance</option>
+                        <option value="favicons">Environment Favicons</option>
                     </select>
                 </div>
-                <div className="hidden sm:block">
+                <div className="hidden sm:block"> 
                      <div className="inline-flex rounded-lg bg-[var(--tab-background)] p-1 space-x-1">
                         <button onClick={() => setActiveTab('branding')} className={`${activeTab === 'branding' ? 'bg-[var(--tab-active-background)] shadow text-[var(--tab-active-foreground)]' : 'text-[var(--tab-foreground)] hover:bg-[var(--tab-hover-background)]'} py-2 px-4 rounded-md font-medium text-sm transition-all`}>
                             App Branding
@@ -204,6 +209,9 @@ const SettingsManagement: React.FC<SettingsManagementProps> = ({ defaultTab = 'b
                         </button>
                         <button onClick={() => setActiveTab('maintenance')} className={`${activeTab === 'maintenance' ? 'bg-[var(--tab-active-background)] shadow text-[var(--tab-active-foreground)]' : 'text-[var(--tab-foreground)] hover:bg-[var(--tab-hover-background)]'} py-2 px-4 rounded-md font-medium text-sm transition-all`}>
                             System Maintenance
+                        </button>
+                        <button onClick={() => setActiveTab('favicons')} className={`${activeTab === 'favicons' ? 'bg-[var(--tab-active-background)] shadow text-[var(--tab-active-foreground)]' : 'text-[var(--tab-foreground)] hover:bg-[var(--tab-hover-background)]'} py-2 px-4 rounded-md font-medium text-sm transition-all`}>
+                            Environment Favicons
                         </button>
                     </div>
                 </div>

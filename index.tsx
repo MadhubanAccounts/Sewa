@@ -4,6 +4,10 @@ import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { applyEnvironmentFavicon } from './utils/favicon';
+
+// Ensure the appropriate environment favicon is initialized
+applyEnvironmentFavicon();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

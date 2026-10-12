@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bgProd" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#1E3A8A"/>
+    </linearGradient>
+    <filter id="shadowProd" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <!-- Background Shape: Rounded Squircle -->
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#bgProd)" filter="url(#shadowProd)"/>
+  
+  <!-- Outer Compliance Shield -->
+  <path d="M32 9 L52 17 C52 36 39 49 32 54 C25 49 12 36 12 17 Z" fill="#1D4ED8" stroke="#FDE047" stroke-width="3" stroke-linejoin="round"/>
+  
+  <!-- Golden Inner Checkmark / Shield Emblem -->
+  <path d="M22 28 L29 35 L42 20" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Golden Seal Star Accent -->
+  <circle cx="32" cy="44" r="3" fill="#FDE047"/>
+</svg>
