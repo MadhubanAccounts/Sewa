@@ -115,13 +115,27 @@ const Login: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const token = params.get('tgLoginToken');
+        // Robust query param extractor supporting regular search query and SPA hash fragments
+        const getParam = (name: string) => {
+            const searchParams = new URLSearchParams(window.location.search);
+            const val = searchParams.get(name);
+            if (val) return val;
+            if (window.location.hash.includes(name)) {
+                const qIdx = window.location.hash.indexOf('?');
+                if (qIdx !== -1) {
+                    const hashParams = new URLSearchParams(window.location.hash.substring(qIdx));
+                    return hashParams.get(name);
+                }
+            }
+            return null;
+        };
+
+        const token = getParam('tgLoginToken');
         if (token) {
             setMiniAppToken(token);
             
             let attempts = 0;
-            const maxAttempts = 30; // 3 seconds total
+            const maxAttempts = 80; // 8 seconds total (vital on slow mobile cellular networks)
             
             const checkTelegram = () => {
                 const tg = (window as any).Telegram?.WebApp;
@@ -305,11 +319,13 @@ const Login: React.FC = () => {
                 }
             } catch (err: any) {
                 consecutiveFailures++;
-                if (consecutiveFailures >= 3) {
+                console.warn(`[Telegram Polling] Transient attempt failure (${consecutiveFailures}):`, err);
+                // Allow up to 15 retries (~37.5s) to survive cold-starts and mobile network lags
+                if (consecutiveFailures >= 15) {
                     isFinished = true;
                     clearInterval(pollInterval);
                     console.warn("Stopping Telegram login polling after repeated server connection errors.");
-                    toast('Could not connect to Telegram verification service. Please try again or use OTP.', 'info');
+                    toast('Lost connection to Telegram verification service. Please try again or use OTP.', 'error');
                 }
             }
         };
@@ -341,6 +357,14 @@ const Login: React.FC = () => {
         return () => clearInterval(interval);
     }, [telegramStatus, telegramExpiry]);
 
+    // Computes complete base application URL supporting root domains and subpath deployments (e.g. GitHub Pages)
+    const getAppBaseUrl = () => {
+        let url = window.location.href.split('?')[0].split('#')[0];
+        url = url.replace(/\/index\.html$/i, '');
+        url = url.replace(/\/+$/, '');
+        return url;
+    };
+
     const handleStartTelegramLogin = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (!mobileNumber || mobileNumber.length !== 10) {
@@ -351,7 +375,8 @@ const Login: React.FC = () => {
         setIsTelegramLoading(true);
         setIsLoading(true);
         try {
-            const res = await api.initiateTelegramLogin(mobileNumber, window.location.origin);
+            const currentAppUrl = getAppBaseUrl();
+            const res = await api.initiateTelegramLogin(mobileNumber, currentAppUrl);
             setTelegramToken(res.token);
             setTgBotUsername(res.botUsername);
             setTelegramExpiry(Date.now() + 5 * 60 * 1000); // 5 minutes validity
@@ -1184,7 +1209,7 @@ const Login: React.FC = () => {
 
                                                     <div className="space-y-3">
                                                         <a 
-                                                            href={`https://t.me/${tgBotUsername}`}
+                                                            href={telegramToken ? `https://t.me/${tgBotUsername}?start=${telegramToken}` : `https://t.me/${tgBotUsername}`}
                                                             target="_blank" 
                                                             rel="noopener noreferrer"
                                                             className="w-full inline-flex items-center justify-center px-4 py-2.5 bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 text-white font-semibold rounded-xl shadow-md transition-all text-xs text-center"
