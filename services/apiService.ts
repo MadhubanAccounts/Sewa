@@ -14,18 +14,27 @@ const STAGING_URL = (import.meta.env.VITE_GAS_STAGING_URL || '').trim();
 const getBackendUrl = () => {
     const hostname = window.location.hostname;
     
-    // AI Studio Preview environments should use STAGING URL
+    // AI Studio Preview environments should prefer STAGING URL
     if (hostname.startsWith('ais-dev-') || hostname.startsWith('ais-pre-')) {
-        console.log(`[API] Detected AI Studio Preview Environment (${hostname}). Using STAGING URL.`);
-        return STAGING_URL;
+        console.log(`[API] Detected AI Studio Preview Environment (${hostname}).`);
+        return STAGING_URL || PROD_URL;
     }
 
-    if (hostname.endsWith('run.app') || hostname.endsWith('firebaseapp.com') || hostname.endsWith('web.app')) {
-        console.log(`[API] Detected Production Environment (${hostname}). Using PROD URL.`);
-        return PROD_URL;
+    // Cloudflare Pages, GitHub Pages, Vercel, Cloud Run, Firebase
+    if (
+        hostname.endsWith('github.io') || 
+        hostname.endsWith('pages.dev') || 
+        hostname.endsWith('vercel.app') || 
+        hostname.endsWith('run.app') || 
+        hostname.endsWith('firebaseapp.com') || 
+        hostname.endsWith('web.app')
+    ) {
+        console.log(`[API] Detected Hosted Production Environment (${hostname}). Using PROD URL.`);
+        return PROD_URL || STAGING_URL;
     }
-    console.log(`[API] Detected Development Environment (${hostname}). Using STAGING URL.`);
-    return STAGING_URL;
+
+    console.log(`[API] Detected Environment (${hostname}). Using available URL.`);
+    return PROD_URL || STAGING_URL;
 };
 
 const GAS_WEB_APP_URL = getBackendUrl();
