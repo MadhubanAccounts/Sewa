@@ -97,7 +97,9 @@ import {
   FileSearch,
   SearchCheck,
   FileX,
-  Send
+  Send,
+  Sprout,
+  Leaf
 } from 'lucide-react';
 
 // Custom Inverted Tick (Mirrored and Rotated Check mark used by CAs/Auditors)
@@ -202,10 +204,15 @@ export const ICONS: { [key: string]: React.ReactElement } = {
   'FileSearch': <FileSearch />,
   'SearchCheck': <SearchCheck />,
   'FileX': <FileX />,
-  'Send': <Send />
+  'Send': <Send />,
+  'Sprout': <Sprout />,
+  'Leaf': <Leaf />
 };
 
 const DashboardView = lazy(() => import('./DashboardView'));
+const FarmDespatchDashboard = lazy(() => import('../farm-despatch/FarmDespatchDashboard'));
+const FarmReportsStandalone = lazy(() => import('../farm-despatch/FarmReportsStandalone'));
+const FarmMastersStandalone = lazy(() => import('../farm-despatch/FarmMastersStandalone'));
 const UserManagement = lazy(() => import('../users/UserManagement'));
 const PeopleManagement = lazy(() => import('../people/PeopleManagement'));
 const NotificationTemplatesManagement = lazy(() => import('../notifications/NotificationTemplatesManagement'));
@@ -289,5 +296,11 @@ export const COMPONENTS: { [key: string]: React.LazyExoticComponent<React.Compon
   'bulk-messaging': BulkMessaging,
   'telegram-attendance-prototype': TelegramAttendancePrototype,
   'telegram-data': TelegramDataManagement,
-  'contact-us-miniapp': ContactUsMiniApp
+  'contact-us-miniapp': ContactUsMiniApp,
+  'farming-despatch': FarmDespatchDashboard,
+  'farm-despatch': FarmDespatchDashboard,
+  'farming-masters': FarmMastersStandalone,
+  'farm-masters': FarmMastersStandalone,
+  'farming-report': FarmReportsStandalone,
+  'farm-report': FarmReportsStandalone
 };

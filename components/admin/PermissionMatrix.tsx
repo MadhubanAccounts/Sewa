@@ -19,6 +19,11 @@ const getShortCode = (permName: string) => {
     if (permName.endsWith('_vacate')) return 'Vc';
     if (permName.endsWith('_move')) return 'Mv';
     if (permName.endsWith('_reserve')) return 'Rs';
+    if (permName.endsWith('_print')) return 'Pr';
+    if (permName.endsWith('_send')) return 'Sn';
+    if (permName.endsWith('_manage')) return 'Mg';
+    if (permName.endsWith('_sync')) return 'Sy';
+    if (permName.endsWith('_export')) return 'Ex';
     
     // Fallback: take first 2 letters of last segment
     const parts = permName.split('_');

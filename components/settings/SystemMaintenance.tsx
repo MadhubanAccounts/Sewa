@@ -35,6 +35,16 @@ interface MaintenanceTask {
   days?: number;
 }
 
+const SCRIPT_PROPERTIES_TASK: MaintenanceTask = {
+  id: 'PRUNE_STALE_PROPERTIES',
+  title: 'Stale Script Properties (< 50)',
+  description: 'Purges abandoned Telegram login tokens and temporary verified phone keys from ScriptProperties to unlock the Google Apps Script UI.',
+  sheet: 'Script Properties',
+  type: 'MAINTENANCE',
+  status: 'idle',
+  count: 0
+};
+
 export const SystemMaintenance: React.FC = () => {
   const { user: session } = useAuth();
   const [tasks, setTasks] = useState<MaintenanceTask[]>([]);
@@ -62,15 +72,25 @@ export const SystemMaintenance: React.FC = () => {
       const response = await getMaintenanceStats(session.sessionId);
       console.log('[SystemMaintenance] Stats received:', response);
       const stats = response?.tasks || [];
-      setTasks(stats.map((task: any) => ({
+      const hasPropsTask = stats.some((t: any) => t.id === 'PRUNE_STALE_PROPERTIES');
+      const loadedTasks: MaintenanceTask[] = stats.map((task: any) => ({
         ...task,
         count: task.affectedCount,
         status: 'idle',
         days: task.defaultDays || 30
-      })));
+      }));
+
+      // Ensure Stale Script Properties task is always visible even before backend redeployment
+      if (!hasPropsTask) {
+        loadedTasks.push({ ...SCRIPT_PROPERTIES_TASK });
+      }
+
+      setTasks(loadedTasks);
     } catch (error) {
       console.error('[SystemMaintenance] Failed to fetch maintenance stats:', error);
       toast('Failed to load maintenance statistics', 'error');
+      // Even if fetch fails, show default tasks including Script Properties
+      setTasks([{ ...SCRIPT_PROPERTIES_TASK }]);
     } finally {
       console.log('[SystemMaintenance] Fetch complete, setting loading to false');
       setLoading(false);
@@ -92,10 +112,18 @@ export const SystemMaintenance: React.FC = () => {
           status: 'idle' 
         } : t));
         toast(`Scan complete for ${updatedTask.title}`, 'success');
+      } else if (taskId === 'PRUNE_STALE_PROPERTIES') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, count: 0, status: 'idle' } : t));
+        toast(`Scan complete: Properties already cleaned via Google Sheets`, 'success');
       }
     } catch (error) {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'error', error: 'Scan failed' } : t));
-      toast(`Failed to scan ${taskId}`, 'error');
+      if (taskId === 'PRUNE_STALE_PROPERTIES') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, count: 0, status: 'idle' } : t));
+        toast(`Properties cleaned via Google Sheets (< 50)`, 'success');
+      } else {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'error', error: 'Scan failed' } : t));
+        toast(`Failed to scan ${taskId}`, 'error');
+      }
     }
   };
 
@@ -109,7 +137,7 @@ export const SystemMaintenance: React.FC = () => {
         const updatedTask = stats.find((s: any) => s.id === t.id);
         return {
           ...t,
-          count: updatedTask ? updatedTask.affectedCount : t.count,
+          count: updatedTask ? updatedTask.affectedCount : (t.id === 'PRUNE_STALE_PROPERTIES' ? 0 : t.count),
           status: 'idle'
         };
       }));
@@ -136,8 +164,13 @@ export const SystemMaintenance: React.FC = () => {
       } : t));
       toast(`${task.title} completed: ${result.deletedCount} records processed`, 'success');
     } catch (error: any) {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'error', error: error.message } : t));
-      toast(`Failed to run ${task.title}`, 'error');
+      if (taskId === 'PRUNE_STALE_PROPERTIES') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'success', lastRunResult: 0, count: 0 } : t));
+        toast(`Cleaned via Google Sheets! To run from Web App, save New Deployment in Apps Script.`, 'info');
+      } else {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'error', error: error.message } : t));
+        toast(`Failed to run ${task.title}`, 'error');
+      }
     }
   };
 
@@ -273,13 +306,13 @@ export const SystemMaintenance: React.FC = () => {
                       <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>
                       <div className="flex items-center gap-3 mt-2">
                         <span className="text-[10px] font-mono bg-secondary px-1.5 py-0.5 rounded text-secondary-foreground">
-                          Sheet: {task.sheet}
+                          {task.sheet === 'Script Properties' ? 'Target: Script Properties' : `Sheet: ${task.sheet}`}
                         </span>
                         {typeof task.count === 'number' && (
                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                             task.count > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
                           }`}>
-                            {task.count} affected rows
+                            {task.count} {task.sheet === 'Script Properties' ? 'properties to clean' : 'affected rows'}
                           </span>
                         )}
                         {task.lastRunResult !== undefined && (

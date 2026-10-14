@@ -7,7 +7,7 @@ import { toast } from '../ui/Toast';
 import { DynamicFormEngine } from '../common/DynamicFormEngine';
 import { AlertTriangle, User, SlidersHorizontal, KeyRound, Copy, ShieldCheck, ShieldAlert, Fingerprint, Trash2, Smartphone, CheckCircle, Info, Loader } from 'lucide-react';
 import MobileNavCustomizer from './MobileNavCustomizer';
-import { SuperMasterRecord, WebAuthnCredential } from '../../types';
+import { SuperMasterRecord, WebAuthnCredential, Permission } from '../../types';
 import * as api from '../../services/apiService';
 import { base64urlToBuffer, bufferToBase64url, isBiometricsAvailable, isWebAuthnPermitted, isEmbeddedFrame, setLocalPasskeyUser, clearLocalPasskeyUser, getLocalPasskeyUser } from '../../utils/webauthn';
 
@@ -388,9 +388,121 @@ const MyProfile: React.FC = () => {
     }, [user]);
     
     const accessibleModules = useMemo(() => {
-        return (user?.appModules || []).filter(module => 
-            !module.permission || hasPermission(module.permission)
-        );
+        const MODULE_PERMISSIONS_EXPANSION: Record<string, string[]> = {
+            'mod_farm_despatch': ['farm_despatch_view', 'farm_entry_add', 'farm_entry_edit', 'farm_entry_delete', 'farm_entry_print', 'farm_telegram_send', 'farm_admin_manage'],
+            'farming-despatch': ['farm_despatch_view', 'farm_entry_add', 'farm_entry_edit', 'farm_entry_delete', 'farm_entry_print', 'farm_telegram_send', 'farm_admin_manage'],
+            'mod_farm_report': ['farm_report_view'],
+            'farming-report': ['farm_report_view'],
+            'mod_users': ['users_view', 'users_add', 'users_edit', 'users_delete', 'notification_send_users'],
+            'users': ['users_view', 'users_add', 'users_edit', 'users_delete', 'notification_send_users'],
+            'mod_people': ['people_view', 'people_add', 'people_edit', 'people_delete'],
+            'people': ['people_view', 'people_add', 'people_edit', 'people_delete'],
+            'mod_perm_matrix': ['permissions_view', 'permissions_edit'],
+            'permission-matrix': ['permissions_view', 'permissions_edit'],
+            'mod_settings': ['settings_view', 'settings_edit'],
+            'settings': ['settings_view', 'settings_edit'],
+            'mod_notification_templates': ['notification_templates_view', 'notification_templates_edit', 'notification_templates_send_manual'],
+            'notification-templates': ['notification_templates_view', 'notification_templates_edit', 'notification_templates_send_manual'],
+            'mod_smr': ['smr_view', 'smr_edit'],
+            'data-dictionary': ['smr_view', 'smr_edit'],
+            'mod_smr_editor': ['smr_edit', 'smr_view'],
+            'smr-editor': ['smr_edit', 'smr_view'],
+            'mod_masters': ['masters_edit'],
+            'masters-management': ['masters_edit'],
+            'mod_aiac_collection_box': ['aiac_view', 'aiac_edit'],
+            'audit-collection-box': ['aiac_view', 'aiac_edit'],
+            'mod_vouching_stats': ['vouching_stats_view', 'vouching_stats_edit'],
+            'vouching-stats': ['vouching_stats_view', 'vouching_stats_edit'],
+            'mod_account_submissions': ['account_submissions_view', 'account_submissions_edit'],
+            'account-submissions': ['account_submissions_view', 'account_submissions_edit'],
+            'mod_audit_status': ['audit_status_edit'],
+            'audit-status': ['audit_status_edit'],
+            'mod_audit_workbench': ['audit_workbench_view', 'audit_workbench_sync', 'audit_workbench_export'],
+            'audit-workbench': ['audit_workbench_view', 'audit_workbench_sync', 'audit_workbench_export'],
+            'mod_bulk_messaging': ['bulk_messaging_view'],
+            'bulk-messaging': ['bulk_messaging_view'],
+            'mod_telegram_data': ['telegram_data_view', 'telegram_data_edit'],
+            'telegram-data': ['telegram_data_view', 'telegram_data_edit']
+        };
+
+        let modulesList = [...(user?.appModules || [])];
+
+        const hasFarmingCategory = modulesList.some(m => m.moduleId === 'cat_farming');
+        if (!hasFarmingCategory) {
+            modulesList.push({
+                moduleId: 'cat_farming',
+                displayName: 'Farming & Agriculture',
+                parentModuleId: null,
+                moduleType: 'CATEGORY',
+                iconName: 'Sprout',
+                componentKey: '',
+                permission: null,
+                isVisible: true,
+                sortOrder: 110
+            });
+        }
+
+        const hasFarmDespatch = modulesList.some(m => m.moduleId === 'mod_farm_despatch' || m.componentKey === 'farming-despatch');
+        if (!hasFarmDespatch) {
+            modulesList.push({
+                moduleId: 'mod_farm_despatch',
+                displayName: 'Produce Despatch (Dadi Gulzar Upvan)',
+                parentModuleId: 'cat_farming',
+                moduleType: 'MODULE',
+                iconName: 'Sprout',
+                componentKey: 'farming-despatch',
+                permission: 'farm_despatch_view,farm_entry_add,farm_entry_edit,farm_entry_delete,farm_entry_print,farm_telegram_send,farm_admin_manage',
+                isVisible: true,
+                sortOrder: 10
+            });
+        }
+
+        const hasFarmReport = modulesList.some(m => m.moduleId === 'mod_farm_report' || m.componentKey === 'farming-report');
+        if (!hasFarmReport) {
+            modulesList.push({
+                moduleId: 'mod_farm_report',
+                displayName: 'Farm Reports & Analytics',
+                parentModuleId: 'cat_farming',
+                moduleType: 'MODULE',
+                iconName: 'BarChart3',
+                componentKey: 'farming-report',
+                permission: 'farm_report_view',
+                isVisible: true,
+                sortOrder: 20
+            });
+        }
+
+        modulesList = modulesList.map(mod => {
+            if (mod.moduleId === 'mod_farm_despatch' || mod.componentKey === 'farming-despatch') {
+                return {
+                    ...mod,
+                    displayName: 'Produce Despatch (Dadi Gulzar Upvan)',
+                    permission: 'farm_despatch_view,farm_entry_add,farm_entry_edit,farm_entry_delete,farm_entry_print,farm_telegram_send,farm_admin_manage'
+                };
+            }
+            if (mod.moduleId === 'mod_farm_report' || mod.componentKey === 'farming-report') {
+                return {
+                    ...mod,
+                    displayName: 'Farm Reports & Analytics',
+                    permission: 'farm_report_view'
+                };
+            }
+            return mod;
+        });
+
+        return modulesList.filter(module => {
+            if (module.moduleType === 'CATEGORY') return true;
+
+            const expansionPerms = MODULE_PERMISSIONS_EXPANSION[module.moduleId] || MODULE_PERMISSIONS_EXPANSION[module.componentKey || ''];
+            if (expansionPerms && expansionPerms.length > 0) {
+                if (expansionPerms.some(p => hasPermission(p as Permission))) return true;
+            }
+
+            if (!module.permission) return true;
+
+            const requiredPerms = module.permission.split(/[,|]/).map(p => p.trim()).filter(Boolean);
+            return requiredPerms.some(p => hasPermission(p as Permission));
+        });
     }, [user?.appModules, hasPermission]);
 
 

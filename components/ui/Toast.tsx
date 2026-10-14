@@ -21,6 +21,11 @@ export const toast = (message: string, type: ToastType = 'info', duration: numbe
   toastListeners.forEach(listener => listener(newToast));
 };
 
+toast.success = (message: string, duration: number = 5000) => toast(message, 'success', duration);
+toast.error = (message: string, duration: number = 5000) => toast(message, 'error', duration);
+toast.info = (message: string, duration: number = 5000) => toast(message, 'info', duration);
+
+
 const typeStyles = {
   success: {
     bg: 'bg-[var(--toast-success-background)]',

@@ -12,11 +12,13 @@
   "dependencies": {
     "@google/genai": "^1.46.0",
     "date-fns": "^4.1.0",
+    "html2canvas": "^1.4.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.38.0",
     "prop-types": "15.8.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-zoom-pan-pinch": "^4.2.0",
     "recharts": "2.12.7",
     "sonner": "^2.0.7",
     "xlsx": "^0.18.5"

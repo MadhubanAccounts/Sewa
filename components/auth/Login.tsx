@@ -71,7 +71,10 @@ const Login: React.FC = () => {
             { moduleId: 'm10', displayName: 'User Management', parentModuleId: null, moduleType: 'MODULE', iconName: 'UserCircle', componentKey: 'users', permission: null, isActive: true, sortOrder: 10 },
             { moduleId: 'm11', displayName: 'Permission Matrix', parentModuleId: null, moduleType: 'MODULE', iconName: 'ShieldCheck', componentKey: 'permission-matrix', permission: null, isActive: true, sortOrder: 11 },
             { moduleId: 'm12', displayName: 'System Settings', parentModuleId: null, moduleType: 'MODULE', iconName: 'Settings', componentKey: 'settings', permission: null, isActive: true, sortOrder: 12 },
-            { moduleId: 'm13', displayName: 'My Profile', parentModuleId: null, moduleType: 'MODULE', iconName: 'User', componentKey: 'my-profile', permission: null, isActive: true, sortOrder: 13 }
+            { moduleId: 'm13', displayName: 'My Profile', parentModuleId: null, moduleType: 'MODULE', iconName: 'User', componentKey: 'my-profile', permission: null, isActive: true, sortOrder: 13 },
+            { moduleId: 'cat_farming', displayName: 'Farming & Agriculture', parentModuleId: null, moduleType: 'CATEGORY', iconName: 'Sprout', componentKey: '', permission: null, isActive: true, sortOrder: 14 },
+            { moduleId: 'mod_farm_despatch', displayName: 'Produce Despatch (Dadi Gulzar Upvan)', parentModuleId: 'cat_farming', moduleType: 'MODULE', iconName: 'Sprout', componentKey: 'farming-despatch', permission: 'farm_despatch_view', isActive: true, sortOrder: 1 },
+            { moduleId: 'mod_farm_report', displayName: 'Farm Reports & Analytics', parentModuleId: 'cat_farming', moduleType: 'MODULE', iconName: 'BarChart3', componentKey: 'farming-report', permission: 'farm_report_view', isActive: true, sortOrder: 2 }
         ];
     };
 

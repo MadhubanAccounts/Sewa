@@ -7,7 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 import ModuleLoader from '../common/ModuleLoader';
 import GlobalSearch from '../search/GlobalSearch';
 import { useData } from '../../hooks/useData';
-import { SearchResultItem, AppModuleConfig } from '../../types';
+import { SearchResultItem, AppModuleConfig, Permission } from '../../types';
 import Welcome from './Welcome';
 import { X, ChevronDown, ChevronUp, Menu, Maximize, Minimize } from 'lucide-react';
 
@@ -97,68 +97,206 @@ const Dashboard: React.FC = () => {
     }, []);
 
     const accessibleModules = useMemo(() => {
-        const baseModules = appModules.filter(module => 
-            !module.permission || hasPermission(module.permission)
-        );
+        // Module permission expansion so presence of ANY assigned permission allows sidebar visibility
+        const MODULE_PERMISSIONS_EXPANSION: Record<string, string[]> = {
+            'mod_farm_despatch': [
+                'farm_despatch_view', 'farm_entry_add', 'farm_entry_edit', 'farm_entry_delete', 
+                'farm_entry_print', 'farm_telegram_send', 'farm_admin_manage', 'farm_ai_rate_fetch',
+                'perm_farm_despatch_view', 'perm_farm_entry_add', 'perm_farm_entry_edit', 'perm_farm_entry_delete', 
+                'perm_farm_entry_print', 'perm_farm_telegram_send', 'perm_farm_admin_manage', 'perm_farm_ai_rate_fetch'
+            ],
+            'farming-despatch': [
+                'farm_despatch_view', 'farm_entry_add', 'farm_entry_edit', 'farm_entry_delete', 
+                'farm_entry_print', 'farm_telegram_send', 'farm_admin_manage', 'farm_ai_rate_fetch',
+                'perm_farm_despatch_view', 'perm_farm_entry_add', 'perm_farm_entry_edit', 'perm_farm_entry_delete', 
+                'perm_farm_entry_print', 'perm_farm_telegram_send', 'perm_farm_admin_manage', 'perm_farm_ai_rate_fetch'
+            ],
+            'mod_farm_masters': ['farm_admin_manage', 'perm_farm_admin_manage'],
+            'farming-masters': ['farm_admin_manage', 'perm_farm_admin_manage'],
+            'mod_farm_report': ['farm_report_view', 'perm_farm_report_view', 'farm_admin_manage', 'perm_farm_admin_manage'],
+            'farming-report': ['farm_report_view', 'perm_farm_report_view', 'farm_admin_manage', 'perm_farm_admin_manage'],
+            'mod_users': ['users_view', 'users_add', 'users_edit', 'users_delete', 'notification_send_users'],
+            'users': ['users_view', 'users_add', 'users_edit', 'users_delete', 'notification_send_users'],
+            'mod_people': ['people_view', 'people_add', 'people_edit', 'people_delete'],
+            'people': ['people_view', 'people_add', 'people_edit', 'people_delete'],
+            'mod_perm_matrix': ['permissions_view', 'permissions_edit'],
+            'permission-matrix': ['permissions_view', 'permissions_edit'],
+            'mod_settings': ['settings_view', 'settings_edit'],
+            'settings': ['settings_view', 'settings_edit'],
+            'mod_notification_templates': ['notification_templates_view', 'notification_templates_edit', 'notification_templates_send_manual'],
+            'notification-templates': ['notification_templates_view', 'notification_templates_edit', 'notification_templates_send_manual'],
+            'mod_smr': ['smr_view', 'smr_edit'],
+            'data-dictionary': ['smr_view', 'smr_edit'],
+            'mod_smr_editor': ['smr_edit', 'smr_view'],
+            'smr-editor': ['smr_edit', 'smr_view'],
+            'mod_masters': ['masters_edit'],
+            'masters-management': ['masters_edit'],
+            'mod_aiac_collection_box': ['aiac_view', 'aiac_edit'],
+            'audit-collection-box': ['aiac_view', 'aiac_edit'],
+            'mod_vouching_stats': ['vouching_stats_view', 'vouching_stats_edit'],
+            'vouching-stats': ['vouching_stats_view', 'vouching_stats_edit'],
+            'mod_account_submissions': ['account_submissions_view', 'account_submissions_edit'],
+            'account-submissions': ['account_submissions_view', 'account_submissions_edit'],
+            'mod_audit_status': ['audit_status_edit'],
+            'audit-status': ['audit_status_edit'],
+            'mod_audit_workbench': ['audit_workbench_view', 'audit_workbench_sync', 'audit_workbench_export'],
+            'audit-workbench': ['audit_workbench_view', 'audit_workbench_sync', 'audit_workbench_export'],
+            'mod_bulk_messaging': ['bulk_messaging_view'],
+            'bulk-messaging': ['bulk_messaging_view'],
+            'mod_telegram_data': ['telegram_data_view', 'telegram_data_edit'],
+            'telegram-data': ['telegram_data_view', 'telegram_data_edit']
+        };
 
-        // Inject Audit Workbench if not present
-        if (!baseModules.find(m => m.moduleId === 'mod_audit_workbench')) {
-            baseModules.push({
-                moduleId: 'mod_audit_workbench',
-                displayName: 'Audit Workbench',
-                iconName: 'Maximize2',
-                componentKey: 'audit-workbench',
-                sortOrder: 55,
+        let modulesList = [...appModules];
+
+        // Ensure Farming & Agriculture category exists in list
+        const hasFarmingCategory = modulesList.some(m => m.moduleId === 'cat_farming');
+        if (!hasFarmingCategory) {
+            modulesList.push({
+                moduleId: 'cat_farming',
+                displayName: 'Farming & Agriculture',
                 parentModuleId: null,
-                moduleType: 'MODULE'
-            } as any);
+                moduleType: 'CATEGORY',
+                iconName: 'Sprout',
+                componentKey: '',
+                permission: null,
+                isVisible: true,
+                sortOrder: 110
+            });
         }
 
-        // Inject Telegram Attendance Prototype if not present
-        if (!baseModules.find(m => m.moduleId === 'mod_telegram_attendance')) {
-            baseModules.push({
-                moduleId: 'mod_telegram_attendance',
-                displayName: 'Telegram Attendance (Proto)',
-                iconName: 'Send',
-                componentKey: 'telegram-attendance-prototype',
-                sortOrder: 56,
-                parentModuleId: null,
-                moduleType: 'MODULE'
-            } as any);
+        // Ensure Produce Despatch module exists
+        const hasFarmDespatch = modulesList.some(m => m.moduleId === 'mod_farm_despatch' || m.componentKey === 'farming-despatch');
+        if (!hasFarmDespatch) {
+            modulesList.push({
+                moduleId: 'mod_farm_despatch',
+                displayName: 'Produce Despatch (Dadi Gulzar Upvan)',
+                parentModuleId: 'cat_farming',
+                moduleType: 'MODULE',
+                iconName: 'Sprout',
+                componentKey: 'farming-despatch',
+                permission: 'farm_despatch_view,farm_entry_add,farm_entry_edit,farm_entry_delete,farm_entry_print,farm_telegram_send,farm_admin_manage,farm_ai_rate_fetch',
+                isVisible: true,
+                sortOrder: 10
+            });
         }
 
-        // Inject Contact Us Mini App if not present
-        if (!baseModules.find(m => m.moduleId === 'mod_contact_us_miniapp')) {
-            baseModules.push({
-                moduleId: 'mod_contact_us_miniapp',
-                displayName: 'Contact Us Mini App',
-                iconName: 'Smartphone',
-                componentKey: 'contact-us-miniapp',
-                sortOrder: 57,
-                parentModuleId: null,
-                moduleType: 'MODULE'
-            } as any);
+        // Ensure Farm Masters module exists for direct master management (Point 2)
+        const hasFarmMasters = modulesList.some(m => m.moduleId === 'mod_farm_masters' || m.componentKey === 'farming-masters');
+        if (!hasFarmMasters) {
+            modulesList.push({
+                moduleId: 'mod_farm_masters',
+                displayName: 'Farm Masters & Rates',
+                parentModuleId: 'cat_farming',
+                moduleType: 'MODULE',
+                iconName: 'Shield',
+                componentKey: 'farming-masters',
+                permission: 'farm_admin_manage',
+                isVisible: true,
+                sortOrder: 15
+            });
         }
 
-        return baseModules;
+        // Ensure Farm Reports module exists
+        const hasFarmReport = modulesList.some(m => m.moduleId === 'mod_farm_report' || m.componentKey === 'farming-report');
+        if (!hasFarmReport) {
+            modulesList.push({
+                moduleId: 'mod_farm_report',
+                displayName: 'Farm Reports & Analytics',
+                parentModuleId: 'cat_farming',
+                moduleType: 'MODULE',
+                iconName: 'BarChart3',
+                componentKey: 'farming-report',
+                permission: 'farm_report_view',
+                isVisible: true,
+                sortOrder: 20
+            });
+        }
+
+        // Normalize and configure existing farm modules
+        modulesList = modulesList.map(mod => {
+            if (mod.moduleId === 'cat_farming') {
+                return {
+                    ...mod,
+                    parentModuleId: null,
+                    isVisible: true
+                };
+            }
+            if (mod.moduleId === 'mod_farm_despatch' || mod.componentKey === 'farming-despatch') {
+                return {
+                    ...mod,
+                    parentModuleId: 'cat_farming',
+                    displayName: 'Produce Despatch (Dadi Gulzar Upvan)',
+                    permission: 'farm_despatch_view,farm_entry_add,farm_entry_edit,farm_entry_delete,farm_entry_print,farm_telegram_send,farm_admin_manage,farm_ai_rate_fetch',
+                    isVisible: true
+                };
+            }
+            if (mod.moduleId === 'mod_farm_masters' || mod.componentKey === 'farming-masters') {
+                return {
+                    ...mod,
+                    parentModuleId: 'cat_farming',
+                    displayName: 'Farm Masters & Rates',
+                    permission: 'farm_admin_manage',
+                    isVisible: true
+                };
+            }
+            if (mod.moduleId === 'mod_farm_report' || mod.componentKey === 'farming-report') {
+                return {
+                    ...mod,
+                    parentModuleId: 'cat_farming',
+                    displayName: 'Farm Reports & Analytics',
+                    permission: 'farm_report_view',
+                    isVisible: true
+                };
+            }
+            return mod;
+        });
+
+        // Universal permission check for all modules (Pure PBAC - No role overrides)
+        return modulesList.filter(module => {
+            // Category headers are included in list; Sidebar will only render categories having accessible children
+            if (module.moduleType === 'CATEGORY') return true;
+
+            const expansionPerms = MODULE_PERMISSIONS_EXPANSION[module.moduleId] || MODULE_PERMISSIONS_EXPANSION[module.componentKey || ''];
+            if (expansionPerms && expansionPerms.length > 0) {
+                if (expansionPerms.some(p => hasPermission(p as Permission))) return true;
+            }
+
+            if (!module.permission) return true;
+
+            const requiredPerms = module.permission.split(/[,|]/).map(p => p.trim()).filter(Boolean);
+            return requiredPerms.some(p => hasPermission(p as Permission));
+        });
     }, [appModules, hasPermission]);
     
-    // Set default tab if none open
+    // Set default tab if none open - Fallback to first accessible module so simulated permissions always open seamlessly
     useEffect(() => {
         if (accessibleModules.length > 0 && openTabs.length === 0) {
             const dashboardModule = accessibleModules.find(m => m.componentKey === 'dashboard');
-            if (dashboardModule) {
+            const targetModule = dashboardModule || accessibleModules.find(m => m.moduleType !== 'CATEGORY' && m.componentKey);
+            if (targetModule) {
                 const newTab: TabItem = {
-                    moduleId: dashboardModule.moduleId,
-                    displayName: dashboardModule.displayName,
-                    componentKey: dashboardModule.componentKey,
-                    iconName: dashboardModule.iconName
+                    moduleId: targetModule.moduleId,
+                    displayName: targetModule.displayName,
+                    componentKey: targetModule.componentKey,
+                    iconName: targetModule.iconName
                 };
                 setOpenTabs([newTab]);
-                setActiveTabId(newTab.moduleId);
+                setActiveTabId(targetModule.moduleId);
             }
         }
     }, [accessibleModules, openTabs.length]);
+
+    // Point 9a: Auto-collapse application header and bottom navigation on mobile when viewing Farming module
+    useEffect(() => {
+        if (isMobile) {
+            const active = accessibleModules.find(m => m.moduleId === activeTabId);
+            if (active?.componentKey === 'farming-despatch' || active?.componentKey === 'farm-despatch') {
+                setIsHeaderVisible(false);
+                setIsNavVisible(false);
+            }
+        }
+    }, [isMobile, activeTabId, accessibleModules]);
     
     const handleModuleSelect = useCallback((moduleId: string, selectedItemId: string | null = null) => {
         const existingTab = openTabs.find(t => t.moduleId === moduleId);
@@ -305,7 +443,7 @@ const Dashboard: React.FC = () => {
 
                 {/* Desktop Tab Bar */}
                 {!isMobile && openTabs.length > 0 && (
-                    <div className={`flex items-center px-4 pt-2 border-b border-[var(--border)] overflow-x-auto scrollbar-hide gap-1 transition-all duration-300 ${isHeaderVisible ? 'bg-[var(--header-background)]' : 'bg-[var(--card-background)] pt-12'}`}>
+                    <div className={`flex items-center px-4 pt-2 border-b border-[var(--border)] overflow-x-auto scrollbar-hide gap-1 transition-all duration-300 ${isHeaderVisible ? 'bg-[var(--header-background)]' : 'bg-[var(--card-background)] pt-2'}`}>
                         {openTabs.map(tab => (
                             <button
                                 key={tab.moduleId}
@@ -354,7 +492,7 @@ const Dashboard: React.FC = () => {
                                 return (
                                     <div 
                                         key={tab.moduleId} 
-                                        className={`absolute inset-0 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 transition-all duration-300 ${isActive ? 'block' : 'hidden'} ${!isHeaderVisible ? '[&_h1]:pl-12 sm:[&_h1]:pl-0' : ''}`}
+                                        className={`absolute inset-0 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 transition-all duration-300 ${isActive ? 'block' : 'hidden'}`}
                                     >
                                         <ActiveComponent 
                                             {...((tab.componentKey === 'dashboard' || tab.componentKey === 'reports') && { onModuleSelect: handleModuleSelect })}
@@ -391,7 +529,7 @@ const Dashboard: React.FC = () => {
             {/* Mobile Bottom Nav */}
             {isMobile && (
                  <>
-                    <div className={`fixed left-0 right-0 z-[35] flex justify-center transition-all duration-300 ${isNavVisible ? 'bottom-[58px]' : 'bottom-0'}`}>
+                    <div className={`fixed left-0 right-0 z-[70] flex justify-center transition-all duration-300 ${isNavVisible ? 'bottom-[58px]' : 'bottom-0'}`}>
                          <button
                             onClick={() => setIsNavVisible(!isNavVisible)}
                             className="bg-[var(--card-background)]/60 backdrop-blur-sm border-t-2 border-x-2 border-[var(--border)] text-[var(--foreground-muted)] rounded-t-3xl px-6 py-0 h-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] hover:text-[var(--primary-color)] hover:bg-[var(--card-background)]/90 transition-all group"
@@ -403,7 +541,7 @@ const Dashboard: React.FC = () => {
                             </div>
                          </button>
                     </div>
-                    <div className={`fixed bottom-0 left-0 right-0 z-30 transition-transform duration-300 ${isNavVisible ? 'translate-y-0' : 'translate-y-full'}`}>
+                    <div className={`fixed bottom-0 left-0 right-0 z-60 transition-transform duration-300 ${isNavVisible ? 'translate-y-0' : 'translate-y-full'}`}>
                         <BottomNav activeModuleId={activeTabId} onModuleSelect={handleModuleSelect} accessibleModules={accessibleModules} />
                     </div>
                  </>

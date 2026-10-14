@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { Permission, PermissionDefinition } from '../../types';
 import { Modal } from '../ui/Modal';
@@ -13,13 +13,22 @@ interface PermissionSimulatorProps {
     onClose: () => void;
 }
 
+const normPerm = (p: any) => String(p || '').trim().toLowerCase().replace(/^perm_/, '');
+
 const PermissionSimulator: React.FC<PermissionSimulatorProps> = ({ isOpen, onClose }) => {
-    const { user, simulatePermissions, resetPermissions, isSimulating } = useAuth();
+    const { user, simulatePermissions, resetPermissions, isSimulating, simulatedPermissions } = useAuth();
     const { permissionDefinitions, loading } = usePermissions();
 
     const [selectedPermissions, setSelectedPermissions] = useState<Set<Permission>>(
-        new Set(user?.permissions || [])
+        new Set(simulatedPermissions || user?.permissions || [])
     );
+
+    // Sync selected permissions whenever dialog opens or simulated/user permissions change
+    useEffect(() => {
+        if (isOpen) {
+            setSelectedPermissions(new Set(simulatedPermissions || user?.permissions || []));
+        }
+    }, [isOpen, simulatedPermissions, user?.permissions]);
 
     const groupedPermissions = useMemo(() => {
         return permissionDefinitions.reduce((acc, perm) => {
@@ -32,13 +41,36 @@ const PermissionSimulator: React.FC<PermissionSimulatorProps> = ({ isOpen, onClo
         }, {} as Record<string, PermissionDefinition[]>);
     }, [permissionDefinitions]);
 
-    const handlePermissionChange = (permissionName: string, checked: boolean) => {
+    const isPermSelected = (perm: PermissionDefinition) => {
+        const cleanName = normPerm(perm.permissionName);
+        const cleanId = normPerm(perm.permissionId);
+        for (const item of selectedPermissions) {
+            const cleanItem = normPerm(item);
+            if (cleanItem === cleanName || cleanItem === cleanId) return true;
+        }
+        return false;
+    };
+
+    const handlePermissionChange = (perm: PermissionDefinition, checked: boolean) => {
         setSelectedPermissions(prev => {
             const newPerms = new Set(prev);
+            const cleanName = normPerm(perm.permissionName);
+            const cleanId = normPerm(perm.permissionId);
+
+            // Remove existing variants
+            for (const item of Array.from(newPerms)) {
+                const cleanItem = normPerm(item);
+                if (cleanItem === cleanName || cleanItem === cleanId) {
+                    newPerms.delete(item);
+                }
+            }
+
             if (checked) {
-                newPerms.add(permissionName);
-            } else {
-                newPerms.delete(permissionName);
+                // Add both permissionName and permissionId to be completely robust
+                newPerms.add(perm.permissionName);
+                if (perm.permissionId && perm.permissionId !== perm.permissionName) {
+                    newPerms.add(perm.permissionId);
+                }
             }
             return newPerms;
         });
@@ -55,7 +87,12 @@ const PermissionSimulator: React.FC<PermissionSimulatorProps> = ({ isOpen, onClo
     };
     
     const handleSelectAll = () => {
-        setSelectedPermissions(new Set(permissionDefinitions.map(p => p.permissionName)));
+        const allSet = new Set<string>();
+        permissionDefinitions.forEach(p => {
+            allSet.add(p.permissionName);
+            if (p.permissionId) allSet.add(p.permissionId);
+        });
+        setSelectedPermissions(allSet);
     };
 
     const handleClearAll = () => {
@@ -105,8 +142,8 @@ const PermissionSimulator: React.FC<PermissionSimulatorProps> = ({ isOpen, onClo
                                             <div key={permission.permissionId}>
                                                 <Checkbox
                                                     id={`sim-${permission.permissionName}`}
-                                                    checked={selectedPermissions.has(permission.permissionName)}
-                                                    onChange={(e) => handlePermissionChange(permission.permissionName, e.target.checked)}
+                                                    checked={isPermSelected(permission)}
+                                                    onChange={(e) => handlePermissionChange(permission, e.target.checked)}
                                                     label={(
                                                         <span className="text-sm text-[var(--foreground)]">
                                                             {permission.description}

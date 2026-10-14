@@ -61,6 +61,18 @@ const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, setSidebarOpen, isMobi
         setLogoError(false); // Reset error state when URL changes
     }, [appIconUrl]);
 
+    // Ensure all categories containing accessible modules are open by default
+    useEffect(() => {
+        const catIds = accessibleModules
+            .filter(m => m.moduleType === 'CATEGORY')
+            .map(m => m.moduleId);
+        setOpenCategories(prev => {
+            const next = new Set(prev);
+            catIds.forEach(id => next.add(id));
+            return next;
+        });
+    }, [accessibleModules]);
+
     useEffect(() => {
         const activeModule = accessibleModules.find(m => m.moduleId === activeModuleId);
         if (activeModule?.parentModuleId) {

@@ -20,6 +20,7 @@ interface AuthContextType {
     updateSession: (updatedData: Partial<Session>) => void;
     // V3.1 Permission Simulation
     isSimulating: boolean;
+    simulatedPermissions: Permission[] | null;
     simulatePermissions: (permissions: Permission[]) => void;
     resetPermissions: () => void;
     lastActivityRef?: React.MutableRefObject<number>;
@@ -327,13 +328,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, [user]);
 
     const hasPermission = useCallback((permission: Permission): boolean => {
-        // If simulation is active, check against the simulated permissions list.
-        if (simulatedPermissions) {
-            return simulatedPermissions.includes(permission);
-        }
-        // V.Final Fix: Explicitly check if `user.permissions` is an array before calling .includes()
-        // This is more robust than optional chaining if the value could be something other than an array or undefined (like null).
-        return Array.isArray(user?.permissions) && user.permissions.includes(permission);
+        if (!permission) return false;
+        const norm = (p: string) => String(p || '').trim().toLowerCase().replace(/^perm_/, '');
+        const target = norm(permission);
+
+        const activePerms = simulatedPermissions !== null
+            ? simulatedPermissions
+            : (Array.isArray(user?.permissions) ? user.permissions : []);
+
+        return activePerms.some(p => {
+            if (!p) return false;
+            return norm(p) === target;
+        });
     }, [user, simulatedPermissions]);
 
     const simulatePermissions = useCallback((permissions: Permission[]) => {
@@ -359,6 +365,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isRefreshing,
         updateSession,
         isSimulating: simulatedPermissions !== null,
+        simulatedPermissions,
         simulatePermissions,
         resetPermissions,
         lastActivityRef,

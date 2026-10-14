@@ -590,3 +590,124 @@ export interface WebAuthnCredential {
     lastUsedAt?: string;
 }
 
+// ============================================================================
+// FARMING (DADI GULZAR UPVAN) PRODUCE DESPATCH MODULE TYPES
+// ============================================================================
+
+export type FarmProduceCategory = 'VEGETABLE' | 'FRUIT' | 'FLOWER' | 'AGRI_PRODUCE';
+
+export type FarmPackagingUnit = 'CRATE' | 'BAG' | 'BOX' | 'BUNDLE' | 'BASKET' | 'LOOSE';
+
+export interface FarmProduceMaster {
+    produceId: string;
+    hindiName: string;
+    englishName: string;
+    category: FarmProduceCategory;
+    defaultPackagingUnit: FarmPackagingUnit;
+    packagingRatioKg?: number; // Approximate kg per packaging unit
+    isActive: boolean;
+    status?: 'ACTIVE' | 'INACTIVE';
+    displayOrder?: number;
+    createdAt?: string;
+}
+
+export interface FarmVehicle {
+    vehicleId: string;
+    vehicleNo: string;
+    defaultDriverName: string;
+    driverPhone?: string;
+    capacityKg?: number;
+    isActive: boolean;
+    status?: 'ACTIVE' | 'INACTIVE';
+}
+
+export interface FarmDestination {
+    destinationId: string;
+    campusName: string;
+    shortCode: string;
+    address?: string;
+    contactPerson?: string;
+    contactPhone?: string;
+    isActive: boolean;
+    status?: 'ACTIVE' | 'INACTIVE';
+    isPrimary?: boolean;
+}
+
+export interface FarmChallanItem {
+    itemId: string;
+    challanNo: string;
+    srNo: number;
+    produceId?: string;
+    hindiName: string;
+    englishName?: string;
+    category: FarmProduceCategory;
+    packagingUnit: FarmPackagingUnit;
+    packagingCount: number; // e.g. 112 Crates
+    packagingRatioKg?: number;
+    quantityKg: number; // e.g. 2240 kg
+    ratePerKg?: number; // Optional daily rate (₹/kg)
+    estimatedValue?: number; // auto-computed: quantityKg * (ratePerKg || 0)
+    notes?: string;
+}
+
+export interface FarmChallan {
+    challanId: string;
+    challanNo: string; // e.g. "0022"
+    challanDate: string; // YYYY-MM-DD
+    dispatchDate: string; // YYYY-MM-DD
+    dispatchTime: string; // HH:mm or "3:30 PM"
+    vehicleNo: string;
+    driverName: string;
+    dispatchFrom: string; // "Dadi Gulzar Upvan, Bhimana"
+    destinationCampus: string; // e.g. "Shantivan"
+    items: FarmChallanItem[];
+    totalPackagingCount: number; // Sum of crates/bags
+    totalQuantityKg: number; // Sum of kg
+    totalQuantityWords?: string; // Hindi or English words
+    totalEstimatedValue?: number; // Sum of item values in ₹
+    senderName: string; // e.g. "B.K. Harish"
+    receiverName: string; // e.g. "Lakmaram (Driver)"
+    status: 'DRAFT' | 'DISPATCHED' | 'DELIVERED' | 'CANCELLED';
+    telegramSentAt?: string;
+    telegramMessageId?: string;
+    isAudited?: boolean;
+    cancellationReason?: string;
+    notes?: string;
+    createdAt: string;
+    createdBy: string;
+    updatedAt?: string;
+    updatedBy?: string;
+}
+
+export interface FarmReportFilters {
+    cadence: 'DAILY' | 'WEEKLY' | 'FORTNIGHTLY' | 'MONTHLY' | 'CUSTOM';
+    startDate?: string;
+    endDate?: string;
+    destinationCampus?: string;
+    category?: string;
+    produceName?: string;
+    vehicleNo?: string;
+    groupBy?: 'ITEM' | 'CATEGORY' | 'DESTINATION' | 'VEHICLE';
+}
+
+export interface FarmReportRow {
+    groupKey: string;
+    groupLabel: string;
+    category?: string;
+    totalTrips: number;
+    totalPackagingCount: number;
+    totalQuantityKg: number;
+    totalEstimatedValue: number;
+    itemsCount: number;
+}
+
+export interface FarmTelegramRecipient {
+    recipientId: string;
+    label: string;
+    chatId: string;
+    role: string;
+    isDefault: boolean;
+    isActive: boolean;
+}
+
+
