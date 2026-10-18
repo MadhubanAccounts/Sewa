@@ -288,8 +288,8 @@ export const EnvironmentFaviconManager: React.FC<EnvironmentFaviconManagerProps>
                         <span className="text-[var(--foreground-muted)]"><code>*.github.io</code></span>
                     </div>
                     <div className="p-2 rounded bg-[var(--card-background)] border border-[var(--border)]">
-                        <strong className="text-[var(--foreground)] block">Cloudflare Pages</strong>
-                        <span className="text-[var(--foreground-muted)]"><code>*.pages.dev</code> / <code>cloudflare</code></span>
+                        <strong className="text-[var(--foreground)] block">Cloudflare Workers</strong>
+                        <span className="text-[var(--foreground-muted)]"><code>*.workers.dev</code> / <code>*.pages.dev</code></span>
                     </div>
                     <div className="p-2 rounded bg-[var(--card-background)] border border-[var(--border)]">
                         <strong className="text-[var(--foreground)] block">Production</strong>

@@ -20,9 +20,11 @@ const getBackendUrl = () => {
         return STAGING_URL || PROD_URL;
     }
 
-    // Cloudflare Pages, GitHub Pages, Vercel, Cloud Run, Firebase
+    // Cloudflare Workers, Cloudflare Pages, GitHub Pages, Vercel, Cloud Run, Firebase
     if (
         hostname.endsWith('github.io') || 
+        hostname.endsWith('workers.dev') || 
+        hostname.includes('workers.dev') || 
         hostname.endsWith('pages.dev') || 
         hostname.endsWith('vercel.app') || 
         hostname.endsWith('run.app') || 

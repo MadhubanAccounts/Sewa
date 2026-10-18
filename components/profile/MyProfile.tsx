@@ -5,7 +5,7 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { toast } from '../ui/Toast';
 import { DynamicFormEngine } from '../common/DynamicFormEngine';
-import { AlertTriangle, User, SlidersHorizontal, KeyRound, Copy, ShieldCheck, ShieldAlert, Fingerprint, Trash2, Smartphone, CheckCircle, Info, Loader, Globe } from 'lucide-react';
+import { AlertTriangle, User, SlidersHorizontal, KeyRound, Copy, ShieldCheck, ShieldAlert, Fingerprint, Trash2, Smartphone, CheckCircle, Info, Loader, Globe, RefreshCw } from 'lucide-react';
 import MobileNavCustomizer from './MobileNavCustomizer';
 import { SuperMasterRecord, WebAuthnCredential, Permission } from '../../types';
 import * as api from '../../services/apiService';
@@ -766,13 +766,29 @@ const MyProfile: React.FC = () => {
 
                     return (
                         <div className="p-4 space-y-6 max-w-2xl animate-in fade-in slide-in-from-bottom-2 duration-300">
-                            <div>
-                                <h2 className="text-xl font-semibold text-[var(--foreground)] mb-2 flex items-center">
-                                    <Fingerprint className="mr-2 text-[var(--primary-color)]" style={{ color: 'var(--primary-color)' }} /> Biometric Passkeys (Fingerprint / Face ID)
-                                </h2>
-                                <p className="text-sm text-[var(--foreground-muted)] leading-relaxed">
-                                    Log in in less than a second using your device's native fingerprint reader, Apple Face ID, Touch ID, or Windows Hello. Passkeys are phishing-resistant and cryptographically domain-specific.
-                                </p>
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1 border-b border-[var(--border-color)]">
+                                <div>
+                                    <h2 className="text-xl font-semibold text-[var(--foreground)] mb-1 flex items-center">
+                                        <Fingerprint className="mr-2 text-[var(--primary-color)]" style={{ color: 'var(--primary-color)' }} /> Biometric Passkeys (Fingerprint / Face ID)
+                                    </h2>
+                                    <p className="text-sm text-[var(--foreground-muted)] leading-relaxed">
+                                        Log in in less than a second using your device's native fingerprint reader, Apple Face ID, Touch ID, or Windows Hello. Passkeys are phishing-resistant and cryptographically domain-specific.
+                                    </p>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={async () => {
+                                        await loadPasskeys();
+                                        toast('Passkeys list refreshed from server.', 'info');
+                                    }}
+                                    isLoading={isLoadingPasskeys}
+                                    className="shrink-0 flex items-center gap-1.5 self-start sm:self-center text-xs h-9 cursor-pointer shadow-xs"
+                                    title="Reload registered passkeys from database"
+                                >
+                                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPasskeys ? 'animate-spin' : ''}`} />
+                                    Refresh Passkeys
+                                </Button>
                             </div>
 
                             {/* Current Domain & Environment Status Banner */}
@@ -898,9 +914,23 @@ const MyProfile: React.FC = () => {
                             {/* Enrolled Devices & Domains List */}
                             <div className="space-y-3">
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                                    <h3 className="font-semibold text-sm text-[var(--foreground)]">
-                                        Enrolled Passkeys Across All Domains {isLoadingPasskeys ? '' : `(${passkeys.length})`}
-                                    </h3>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="font-semibold text-sm text-[var(--foreground)]">
+                                            Enrolled Passkeys Across All Domains {isLoadingPasskeys ? '' : `(${passkeys.length})`}
+                                        </h3>
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                await loadPasskeys();
+                                                toast('Passkeys reloaded.', 'info');
+                                            }}
+                                            disabled={isLoadingPasskeys}
+                                            className="p-1 rounded-md text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-muted)] transition-colors cursor-pointer"
+                                            title="Reload passkeys list"
+                                        >
+                                            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPasskeys ? 'animate-spin' : ''}`} />
+                                        </button>
+                                    </div>
                                     {uniqueDomains.length > 0 && (
                                         <span className="text-[11px] text-[var(--foreground-muted)]">
                                             Active on {uniqueDomains.length} domain{uniqueDomains.length > 1 ? 's' : ''}: {uniqueDomains.join(', ')}
@@ -925,8 +955,8 @@ const MyProfile: React.FC = () => {
                                 ) : (
                                     <div className="space-y-2.5">
                                         {passkeys.map((p) => {
-                                            const pDomain = p.domain ? p.domain.toLowerCase() : '';
-                                            const isMatchingCurrentDomain = pDomain && pDomain === currentDomain.toLowerCase();
+                                            const pDomain = (p.domain || '').trim().toLowerCase();
+                                            const isMatchingCurrentDomain = Boolean(pDomain && pDomain === currentDomain.toLowerCase());
                                             const friendlyDomainName = getDomainFriendlyName(p.domain);
 
                                             return (
@@ -945,7 +975,7 @@ const MyProfile: React.FC = () => {
                                                                 </p>
                                                                 {isMatchingCurrentDomain ? (
                                                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1 shrink-0">
-                                                                        <CheckCircle className="w-3 h-3" /> Current Domain
+                                                                        <CheckCircle className="w-3 h-3" /> Current Domain ({friendlyDomainName})
                                                                     </span>
                                                                 ) : (
                                                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--background-muted)] text-[var(--foreground-muted)] border border-[var(--border-color)] flex items-center gap-1 shrink-0">
@@ -955,7 +985,7 @@ const MyProfile: React.FC = () => {
                                                             </div>
                                                             <div className="flex items-center gap-2 text-[10px] text-[var(--foreground-muted)] flex-wrap mt-0.5">
                                                                 <span className="font-mono text-[var(--foreground-muted)] truncate">
-                                                                    Domain: {p.domain || 'All / Legacy'}
+                                                                    Domain: {p.domain || 'All Domains / Legacy'}
                                                                 </span>
                                                                 <span>•</span>
                                                                 <span>Added: {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'Recently'}</span>

@@ -40,11 +40,11 @@ export const ENVIRONMENTS: Record<AppEnvironment, EnvironmentFaviconInfo> = {
     },
     cloudflare: {
         id: 'cloudflare',
-        name: 'Cloudflare Pages',
-        domainPattern: '*.pages.dev, *.cloudflare.com',
+        name: 'Cloudflare Workers',
+        domainPattern: '*.workers.dev, *.pages.dev, *.cloudflare.com',
         iconPath: './favicon-cloudflare.svg',
         badgeColor: '#F38020',
-        description: 'Cloudflare Pages global edge deployment'
+        description: 'Cloudflare Workers edge deployment (*.workers.dev)'
     },
     production: {
         id: 'production',
@@ -70,7 +70,7 @@ export const detectCurrentEnvironment = (hostname = window.location.hostname): A
         return 'github';
     }
     
-    if (host.includes('pages.dev') || host.includes('cloudflare')) {
+    if (host.includes('workers.dev') || host.includes('pages.dev') || host.includes('cloudflare')) {
         return 'cloudflare';
     }
     

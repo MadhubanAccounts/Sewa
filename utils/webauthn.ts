@@ -151,9 +151,10 @@ export function getCurrentDomain(): string {
 }
 
 export function getDomainFriendlyName(domain?: string): string {
-    const d = (domain || getCurrentDomain()).toLowerCase();
-    if (!d) return 'Unknown Domain';
+    if (!domain || !domain.trim()) return 'All Domains / Legacy';
+    const d = domain.toLowerCase().trim();
     if (d.includes('github.io')) return 'GitHub Pages';
+    if (d.includes('workers.dev')) return 'Cloudflare Workers';
     if (d.includes('pages.dev') || d.includes('cloudflare')) return 'Cloudflare Pages';
     if (d.includes('run.app') || d.includes('ais-')) return 'Google AI Studio';
     if (d === 'localhost' || d === '127.0.0.1') return 'Localhost Dev';
