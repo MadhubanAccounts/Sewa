@@ -177,28 +177,20 @@ const MyProfile: React.FC = () => {
         try {
             const data = await api.getUserPasskeys(user.sessionId);
             const local = getLocalPasskeyUser();
-            let list = Array.isArray(data) ? [...data] : [];
-            if (list.length === 0 && local) {
-                list = [{
-                    credentialId: 'local_device_key',
-                    deviceName: 'This Device (Biometric Passkey)',
-                    domain: local.domain || currentDomain,
-                    createdAt: local.enrolledAt,
-                    lastUsedAt: new Date().toISOString()
-                } as any];
-            }
+            const list = Array.isArray(data) ? [...data] : [];
             setPasskeys(list);
 
-            // Check if current domain has an enrolled key
-            const isEnrolledOnThisDomain = list.some(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase()) ||
-                (local?.domain ? local.domain.toLowerCase() === currentDomain.toLowerCase() : false) ||
-                (list.some(p => !p.domain) && list.length > 0);
-
+            // Active enrollment on THIS domain must come strictly from the server list
+            const isEnrolledOnThisDomain = list.some(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase());
             setIsCurrentDeviceEnrolled(isEnrolledOnThisDomain);
 
-            // If account has a passkey registered for THIS domain, ensure this browser has the local hint saved
-            const matchingDomainKey = list.find(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase());
-            if (matchingDomainKey && user) {
+            // Reconcile client localStorage:
+            // If the database has no passkey for the current domain, but local storage had a hint for it, purge the stale local hint.
+            if (!isEnrolledOnThisDomain) {
+                if (local && (!local.domain || local.domain.toLowerCase() === currentDomain.toLowerCase())) {
+                    clearLocalPasskeyUser();
+                }
+            } else if (isEnrolledOnThisDomain && user) {
                 const cleanMobile = (
                     user.primaryMobile ||
                     (user as any).mobile ||
@@ -207,28 +199,19 @@ const MyProfile: React.FC = () => {
                     ''
                 ).toString().replace(/[^0-9]/g, '').slice(-10);
 
+                const matchingDomainKey = list.find(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase());
                 setLocalPasskeyUser({
                     userId: user.userId,
                     name: user.name,
                     mobileNumber: cleanMobile,
-                    enrolledAt: matchingDomainKey.createdAt || new Date().toISOString(),
+                    enrolledAt: matchingDomainKey?.createdAt || new Date().toISOString(),
                     domain: currentDomain
                 });
             }
         } catch (error) {
             console.error('[MyProfile] Failed to fetch passkeys:', error);
-            const local = getLocalPasskeyUser();
-            if (local) {
-                const isCurrentDomain = !local.domain || local.domain.toLowerCase() === currentDomain.toLowerCase();
-                setIsCurrentDeviceEnrolled(isCurrentDomain);
-                setPasskeys([{
-                    credentialId: 'local_device_key',
-                    deviceName: 'This Device (Biometric Passkey)',
-                    domain: local.domain || currentDomain,
-                    createdAt: local.enrolledAt,
-                    lastUsedAt: new Date().toISOString()
-                } as any]);
-            }
+            setPasskeys([]);
+            setIsCurrentDeviceEnrolled(false);
         } finally {
             setIsLoadingPasskeys(false);
         }
@@ -240,7 +223,7 @@ const MyProfile: React.FC = () => {
         });
         const currentDomain = getCurrentDomain();
         const enrolled = getLocalPasskeyUser();
-        const isCurrentMatch = Boolean(enrolled && (!enrolled.domain || enrolled.domain.toLowerCase() === currentDomain.toLowerCase()));
+        const isCurrentMatch = Boolean(enrolled && enrolled.domain && enrolled.domain.toLowerCase() === currentDomain.toLowerCase());
         setIsCurrentDeviceEnrolled(isCurrentMatch);
     }, []);
 

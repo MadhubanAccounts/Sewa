@@ -723,11 +723,20 @@ const Login: React.FC = () => {
         const currentDomain = getCurrentDomain();
         const enrolled = getLocalPasskeyUser();
         if (enrolled) {
-            setLocalPasskeyUser(enrolled);
-            const isCurrentDomainMatch = !enrolled.domain || enrolled.domain.toLowerCase() === currentDomain.toLowerCase();
-            const cleanEnrolled = String(enrolled.mobileNumber || '').replace(/[^0-9]/g, '').slice(-10);
-            if (isCurrentDomainMatch && cleanEnrolled.length === 10 && !mobileNumber) {
-                setMobileNumber(cleanEnrolled);
+            const isCurrentDomainMatch = Boolean(enrolled.domain && enrolled.domain.toLowerCase() === currentDomain.toLowerCase());
+            if (isCurrentDomainMatch) {
+                setLocalPasskeyUser(enrolled);
+                const cleanEnrolled = String(enrolled.mobileNumber || '').replace(/[^0-9]/g, '').slice(-10);
+                if (cleanEnrolled.length === 10 && !mobileNumber) {
+                    setMobileNumber(cleanEnrolled);
+                }
+            } else if (enrolled.domain) {
+                // Keep reference for helpful cross-domain guidance card
+                setLocalPasskeyUser(enrolled);
+            } else {
+                // Untagged legacy hint - clean up
+                clearLocalPasskeyUser();
+                setLocalPasskeyUser(null);
             }
         }
     }, []);
@@ -824,8 +833,10 @@ const Login: React.FC = () => {
             const msg = error?.message || 'Biometric authentication failed.';
             if (msg.startsWith('NO_CREDENTIALS_FOR_DOMAIN:')) {
                 const phone = msg.split(':')[1];
+                clearLocalPasskeyUser();
+                setLocalPasskeyUser(null);
                 toast(
-                    `No biometric passkey registered for +91 ${phone} on ${domainFriendly} (${currentDomain}). Passkeys are domain-specific. Please log in with Telegram or OTP, then register this domain in My Profile ➔ Biometrics.`,
+                    `No biometric passkey registered for +91 ${phone} on ${domainFriendly} (${currentDomain}). The previous device hint has been reset. Please log in with Telegram or OTP, then register this domain in My Profile ➔ Biometrics.`,
                     'error'
                 );
             } else if (msg.includes('publickey-credentials') || msg.includes('Permissions Policy') || msg.includes('cross-origin child frames')) {
@@ -838,9 +849,11 @@ const Login: React.FC = () => {
                     toast('Biometric prompt was cancelled.', 'info');
                 }
             } else if (msg.includes('Unrecognized passkey credential') || msg.includes('not found') || msg.includes('not registered')) {
+                clearLocalPasskeyUser();
+                setLocalPasskeyUser(null);
                 toast(
                     targetMobile 
-                        ? `No biometric passkey is registered for +91 ${targetMobile} on ${domainFriendly} (${currentDomain}). Please log in with Telegram or OTP first, then register this domain in My Profile ➔ Biometrics.`
+                        ? `No biometric passkey is registered for +91 ${targetMobile} on ${domainFriendly} (${currentDomain}). The previous device hint has been reset. Please log in with Telegram or OTP first, then register this domain in My Profile ➔ Biometrics.`
                         : `No biometric passkey registered on ${domainFriendly} (${currentDomain}) yet. Please enter your mobile number and log in with Telegram or OTP first, then register this domain in My Profile ➔ Biometrics.`,
                     'error'
                 );
@@ -1092,7 +1105,7 @@ const Login: React.FC = () => {
                                     {/* 1-Tap Quick Passkey Login Card (Domain-Aware) */}
                                     {localPasskeyUser && (() => {
                                         const currentHost = getCurrentDomain();
-                                        const isDomainMatch = !localPasskeyUser.domain || localPasskeyUser.domain.toLowerCase() === currentHost.toLowerCase();
+                                        const isDomainMatch = Boolean(localPasskeyUser.domain && localPasskeyUser.domain.toLowerCase() === currentHost.toLowerCase());
                                         
                                         if (isDomainMatch) {
                                             return (
