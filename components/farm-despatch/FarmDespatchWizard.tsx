@@ -692,13 +692,14 @@ export const FarmDespatchWizard: React.FC<FarmDespatchWizardProps> = ({
                         {/* Save Button (Steps 1, 2, 3) */}
                         <button
                             type="button"
-                            onClick={() => handleSaveDraft()}
+                            onClick={() => handleFinish('DRAFT')}
                             disabled={isSubmitting || isSavingDraft}
                             className="w-[42px] h-[42px] rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 transition-colors flex items-center justify-center shadow-sm"
                             title="Save Draft"
                         >
                             <Save className="w-5 h-5" />
                         </button>
+
 
                         {/* Next / Dispatch Action */}
                         {(step === 1 || step === 2) && (

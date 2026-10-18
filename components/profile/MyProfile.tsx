@@ -5,11 +5,12 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { toast } from '../ui/Toast';
 import { DynamicFormEngine } from '../common/DynamicFormEngine';
-import { AlertTriangle, User, SlidersHorizontal, KeyRound, Copy, ShieldCheck, ShieldAlert, Fingerprint, Trash2, Smartphone, CheckCircle, Info, Loader } from 'lucide-react';
+import { AlertTriangle, User, SlidersHorizontal, KeyRound, Copy, ShieldCheck, ShieldAlert, Fingerprint, Trash2, Smartphone, CheckCircle, Info, Loader, Globe } from 'lucide-react';
 import MobileNavCustomizer from './MobileNavCustomizer';
 import { SuperMasterRecord, WebAuthnCredential, Permission } from '../../types';
 import * as api from '../../services/apiService';
-import { base64urlToBuffer, bufferToBase64url, isBiometricsAvailable, isWebAuthnPermitted, isEmbeddedFrame, setLocalPasskeyUser, clearLocalPasskeyUser, getLocalPasskeyUser } from '../../utils/webauthn';
+import { base64urlToBuffer, bufferToBase64url, isBiometricsAvailable, isWebAuthnPermitted, isEmbeddedFrame, setLocalPasskeyUser, clearLocalPasskeyUser, getLocalPasskeyUser, getCurrentDomain, getDomainFriendlyName } from '../../utils/webauthn';
+
 
 type Tab = 'profile' | 'navigation' | 'twofactor' | 'security' | 'biometrics';
 
@@ -172,6 +173,7 @@ const MyProfile: React.FC = () => {
     const loadPasskeys = async () => {
         if (!user) return;
         setIsLoadingPasskeys(true);
+        const currentDomain = getCurrentDomain();
         try {
             const data = await api.getUserPasskeys(user.sessionId);
             const local = getLocalPasskeyUser();
@@ -180,16 +182,23 @@ const MyProfile: React.FC = () => {
                 list = [{
                     credentialId: 'local_device_key',
                     deviceName: 'This Device (Biometric Passkey)',
+                    domain: local.domain || currentDomain,
                     createdAt: local.enrolledAt,
                     lastUsedAt: new Date().toISOString()
                 } as any];
             }
             setPasskeys(list);
-            const isEnrolled = !!local || list.length > 0;
-            setIsCurrentDeviceEnrolled(isEnrolled);
 
-            // If account already has passkeys registered in backend, ensure this browser has the local hint saved
-            if (!local && list.length > 0 && user) {
+            // Check if current domain has an enrolled key
+            const isEnrolledOnThisDomain = list.some(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase()) ||
+                (local?.domain ? local.domain.toLowerCase() === currentDomain.toLowerCase() : false) ||
+                (list.some(p => !p.domain) && list.length > 0);
+
+            setIsCurrentDeviceEnrolled(isEnrolledOnThisDomain);
+
+            // If account has a passkey registered for THIS domain, ensure this browser has the local hint saved
+            const matchingDomainKey = list.find(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase());
+            if (matchingDomainKey && user) {
                 const cleanMobile = (
                     user.primaryMobile ||
                     (user as any).mobile ||
@@ -202,17 +211,20 @@ const MyProfile: React.FC = () => {
                     userId: user.userId,
                     name: user.name,
                     mobileNumber: cleanMobile,
-                    enrolledAt: list[0]?.createdAt || new Date().toISOString()
+                    enrolledAt: matchingDomainKey.createdAt || new Date().toISOString(),
+                    domain: currentDomain
                 });
             }
         } catch (error) {
             console.error('[MyProfile] Failed to fetch passkeys:', error);
             const local = getLocalPasskeyUser();
             if (local) {
-                setIsCurrentDeviceEnrolled(true);
+                const isCurrentDomain = !local.domain || local.domain.toLowerCase() === currentDomain.toLowerCase();
+                setIsCurrentDeviceEnrolled(isCurrentDomain);
                 setPasskeys([{
                     credentialId: 'local_device_key',
                     deviceName: 'This Device (Biometric Passkey)',
+                    domain: local.domain || currentDomain,
                     createdAt: local.enrolledAt,
                     lastUsedAt: new Date().toISOString()
                 } as any]);
@@ -226,8 +238,10 @@ const MyProfile: React.FC = () => {
         isBiometricsAvailable().then(supported => {
             setIsHardwareSupported(supported);
         });
+        const currentDomain = getCurrentDomain();
         const enrolled = getLocalPasskeyUser();
-        setIsCurrentDeviceEnrolled(!!enrolled);
+        const isCurrentMatch = Boolean(enrolled && (!enrolled.domain || enrolled.domain.toLowerCase() === currentDomain.toLowerCase()));
+        setIsCurrentDeviceEnrolled(isCurrentMatch);
     }, []);
 
     useEffect(() => {
@@ -249,16 +263,19 @@ const MyProfile: React.FC = () => {
         }
 
         setIsRegisteringPasskey(true);
+        const currentDomain = getCurrentDomain();
+        const friendlyName = getDomainFriendlyName(currentDomain);
+
         try {
             // 1. Get Registration Challenge from Backend
             const options = await api.getPasskeyRegistrationOptions(user.sessionId);
 
-            // 2. Prepare Public Key Credential Creation Options
+            // 2. Prepare Public Key Credential Creation Options scoped to current domain
             const creationOptions: PublicKeyCredentialCreationOptions = {
                 challenge: base64urlToBuffer(options.challenge),
                 rp: {
                     name: options.rp.name || 'BK Audit Portal',
-                    id: options.rp.id || window.location.hostname
+                    id: currentDomain || window.location.hostname
                 },
                 user: {
                     id: base64urlToBuffer(options.user.id),
@@ -293,7 +310,7 @@ const MyProfile: React.FC = () => {
             const clientDataJSON = bufferToBase64url(response.clientDataJSON);
             const attestationObject = bufferToBase64url(response.attestationObject);
 
-            // Friendly device name
+            // Friendly device name with domain hint
             let deviceName = 'Biometric Authenticator';
             const ua = navigator.userAgent;
             if (/iPhone|iPad|iPod/.test(ua)) {
@@ -308,15 +325,16 @@ const MyProfile: React.FC = () => {
                 deviceName = 'Platform Authenticator';
             }
 
-            // 4. Send back to Backend to verify & store in Hub Spreadsheet
+            // 4. Send back to Backend to verify & store in Hub Spreadsheet with domain
             await api.verifyPasskeyRegistration(user.sessionId, {
                 credentialId,
                 clientDataJSON,
                 attestationObject,
-                deviceName
+                deviceName,
+                domain: currentDomain
             });
 
-            // 5. Store local hint for 1-tap quick sign-in on this device
+            // 5. Store local hint for 1-tap quick sign-in on this device & domain
             const cleanMobile = (
                 user.primaryMobile ||
                 (user as any).mobile ||
@@ -329,11 +347,12 @@ const MyProfile: React.FC = () => {
                 userId: user.userId,
                 name: user.name,
                 mobileNumber: cleanMobile,
-                enrolledAt: new Date().toISOString()
+                enrolledAt: new Date().toISOString(),
+                domain: currentDomain
             });
             setIsCurrentDeviceEnrolled(true);
 
-            toast('✓ Biometric Passkey enrolled successfully! You can now log in using your fingerprint or Face ID.', 'success');
+            toast(`✓ Biometric Passkey enrolled successfully for ${friendlyName}! You can now use 1-Tap Login on this domain.`, 'success');
             await loadPasskeys();
         } catch (error: any) {
             const msg = error?.message || 'Biometric registration failed.';
@@ -358,12 +377,14 @@ const MyProfile: React.FC = () => {
         }
 
         setDeletingCredentialId(credentialId);
+        const currentDomain = getCurrentDomain();
         try {
             await api.deletePasskey(user.sessionId, credentialId);
             toast('Passkey removed successfully.', 'success');
             const updated = passkeys.filter(p => p.credentialId !== credentialId);
             setPasskeys(updated);
-            if (updated.length === 0) {
+            const stillEnrolledOnCurrent = updated.some(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase());
+            if (!stillEnrolledOnCurrent) {
                 clearLocalPasskeyUser();
                 setIsCurrentDeviceEnrolled(false);
             }
@@ -373,6 +394,7 @@ const MyProfile: React.FC = () => {
             setDeletingCredentialId(null);
         }
     };
+
 
     useEffect(() => {
         if (user) {
@@ -752,149 +774,251 @@ const MyProfile: React.FC = () => {
                         </div>
                     </div>
                 )}
-                {activeTab === 'biometrics' && (
-                    <div className="p-4 space-y-6 max-w-2xl animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        <div>
-                            <h2 className="text-xl font-semibold text-[var(--foreground)] mb-2 flex items-center">
-                                <Fingerprint className="mr-2 text-[var(--primary-color)]" style={{ color: 'var(--primary-color)' }} /> Biometric Passkeys (Fingerprint / Face ID)
-                            </h2>
-                            <p className="text-sm text-[var(--foreground-muted)] leading-relaxed">
-                                Log in in less than a second using your device's native fingerprint reader, Apple Face ID, Touch ID, or Windows Hello. Passkeys are phishing-resistant and cryptographic.
-                            </p>
-                        </div>
+                {activeTab === 'biometrics' && (() => {
+                    const currentDomain = getCurrentDomain();
+                    const currentDomainFriendly = getDomainFriendlyName(currentDomain);
+                    const currentDomainPasskeys = passkeys.filter(p => p.domain && p.domain.toLowerCase() === currentDomain.toLowerCase());
+                    const otherDomainPasskeys = passkeys.filter(p => !p.domain || p.domain.toLowerCase() !== currentDomain.toLowerCase());
+                    const uniqueDomains = Array.from(new Set(passkeys.map(p => p.domain ? getDomainFriendlyName(p.domain) : 'Legacy / Unassigned'))).filter(Boolean);
 
-                        {/* Hardware Support Indicator */}
-                        <div className={`p-4 rounded-xl border flex items-start gap-3 ${isHardwareSupported ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : isEmbeddedFrame() ? 'bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
-                            {isHardwareSupported ? (
-                                <CheckCircle className="w-5 h-5 mt-0.5 shrink-0" />
-                            ) : (
-                                <Info className="w-5 h-5 mt-0.5 shrink-0" />
-                            )}
-                            <div className="text-xs leading-relaxed">
+                    return (
+                        <div className="p-4 space-y-6 max-w-2xl animate-in fade-in slide-in-from-bottom-2 duration-300">
+                            <div>
+                                <h2 className="text-xl font-semibold text-[var(--foreground)] mb-2 flex items-center">
+                                    <Fingerprint className="mr-2 text-[var(--primary-color)]" style={{ color: 'var(--primary-color)' }} /> Biometric Passkeys (Fingerprint / Face ID)
+                                </h2>
+                                <p className="text-sm text-[var(--foreground-muted)] leading-relaxed">
+                                    Log in in less than a second using your device's native fingerprint reader, Apple Face ID, Touch ID, or Windows Hello. Passkeys are phishing-resistant and cryptographically domain-specific.
+                                </p>
+                            </div>
+
+                            {/* Current Domain & Environment Status Banner */}
+                            <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--background-muted)]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="w-9 h-9 rounded-lg bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center shrink-0">
+                                        <Globe className="w-5 h-5" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-xs font-bold text-[var(--foreground)] truncate">
+                                                Active Domain: {currentDomainFriendly}
+                                            </span>
+                                            {isCurrentDeviceEnrolled ? (
+                                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                                    <CheckCircle className="w-3 h-3" /> Registered
+                                                </span>
+                                            ) : (
+                                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                                    <Info className="w-3 h-3" /> Not Enrolled
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-[11px] font-mono text-[var(--foreground-muted)] truncate mt-0.5">
+                                            {currentDomain || 'Unknown Host'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="text-[11px] text-[var(--foreground-muted)] self-start sm:self-center shrink-0">
+                                    {currentDomainPasskeys.length > 0 ? (
+                                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                            {currentDomainPasskeys.length} key{currentDomainPasskeys.length > 1 ? 's' : ''} on this domain
+                                        </span>
+                                    ) : (
+                                        <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                            Requires domain enrollment
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Hardware Support Indicator */}
+                            <div className={`p-4 rounded-xl border flex items-start gap-3 ${isHardwareSupported ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : isEmbeddedFrame() ? 'bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
                                 {isHardwareSupported ? (
-                                    <span>
-                                        <strong>Hardware Verified:</strong> This device supports native platform biometrics (Face ID / Fingerprint / Touch ID). You can enroll this device below for 1-tap instant sign-in.
-                                    </span>
-                                ) : isEmbeddedFrame() ? (
-                                    <span>
-                                        <strong>Preview Mode Note:</strong> You are viewing this application in an embedded preview frame. WebAuthn Passkeys are restricted in child iframes by browser security policies. To register or authenticate with Face ID / Touch ID / Windows Hello, open the app directly in a full browser tab.
-                                    </span>
+                                    <CheckCircle className="w-5 h-5 mt-0.5 shrink-0" />
                                 ) : (
-                                    <span>
-                                        <strong>Notice:</strong> Native platform authenticator wasn't automatically verified on this browser. You can still attempt enrollment if your phone or security key supports FIDO2 / WebAuthn.
-                                    </span>
+                                    <Info className="w-5 h-5 mt-0.5 shrink-0" />
+                                )}
+                                <div className="text-xs leading-relaxed">
+                                    {isHardwareSupported ? (
+                                        <span>
+                                            <strong>Hardware Verified:</strong> This device supports native platform biometrics (Face ID / Fingerprint / Touch ID). You can enroll this device below for 1-tap instant sign-in.
+                                        </span>
+                                    ) : isEmbeddedFrame() ? (
+                                        <span>
+                                            <strong>Preview Mode Note:</strong> You are viewing this application in an embedded preview frame. WebAuthn Passkeys are restricted in child iframes by browser security policies. To register or authenticate with Face ID / Touch ID / Windows Hello, open the app directly in a full browser tab.
+                                        </span>
+                                    ) : (
+                                        <span>
+                                            <strong>Notice:</strong> Native platform authenticator wasn't automatically verified on this browser. You can still attempt enrollment if your phone or security key supports FIDO2 / WebAuthn.
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Enrollment Box (Domain-Aware) */}
+                            {isCurrentDeviceEnrolled ? (
+                                <div className="border border-emerald-500/30 bg-emerald-500/10 p-5 rounded-xl space-y-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div className="flex items-start gap-2.5">
+                                            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                                                <CheckCircle className="w-4 h-4" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-semibold text-sm text-emerald-800 dark:text-emerald-300">
+                                                    This Device is Registered for {currentDomainFriendly}
+                                                </h3>
+                                                <p className="text-xs text-[var(--foreground-muted)] mt-1 leading-relaxed">
+                                                    Your biometric passkey is active for <strong>{currentDomain}</strong>. When you log in next time from this URL, you will see the <strong>1-Tap Login</strong> card.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleRegisterPasskey}
+                                            isLoading={isRegisteringPasskey}
+                                            className="border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 shrink-0 text-xs px-3 h-8 self-start sm:self-center"
+                                        >
+                                            <Fingerprint className="w-3.5 h-3.5 mr-1" />
+                                            Add Another Key
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="border border-blue-500/30 bg-blue-500/10 p-5 rounded-xl space-y-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div className="flex items-start gap-2.5">
+                                            <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                                                <Smartphone className="w-4 h-4" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-semibold text-sm text-[var(--foreground)]">
+                                                    Register Device for {currentDomainFriendly}
+                                                </h3>
+                                                <p className="text-xs text-[var(--foreground-muted)] mt-1 leading-relaxed">
+                                                    WebAuthn passkeys are cryptographically isolated per domain. Tap below to register this device for <strong>{currentDomain}</strong> to enable 1-Tap Login on this site.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            onClick={handleRegisterPasskey}
+                                            isLoading={isRegisteringPasskey}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white shrink-0 text-xs px-3 h-9 flex items-center gap-1.5 self-start sm:self-center shadow-sm"
+                                        >
+                                            <Fingerprint className="w-4 h-4" />
+                                            Register for this Domain
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Enrolled Devices & Domains List */}
+                            <div className="space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                    <h3 className="font-semibold text-sm text-[var(--foreground)]">
+                                        Enrolled Passkeys Across All Domains {isLoadingPasskeys ? '' : `(${passkeys.length})`}
+                                    </h3>
+                                    {uniqueDomains.length > 0 && (
+                                        <span className="text-[11px] text-[var(--foreground-muted)]">
+                                            Active on {uniqueDomains.length} domain{uniqueDomains.length > 1 ? 's' : ''}: {uniqueDomains.join(', ')}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {isLoadingPasskeys ? (
+                                    <div className="p-8 border border-[var(--border-color)] rounded-xl bg-[var(--background-muted)]/40 flex flex-col items-center justify-center space-y-3 text-center animate-in fade-in duration-200">
+                                        <Loader className="w-6 h-6 animate-spin text-[var(--primary-color)]" />
+                                        <span className="text-xs font-medium text-[var(--foreground-muted)] animate-pulse">
+                                            Loading registered passkeys...
+                                        </span>
+                                    </div>
+                                ) : passkeys.length === 0 ? (
+                                    <div className="p-6 border border-dashed border-[var(--border-color)] rounded-xl text-center space-y-2">
+                                        <Fingerprint className="w-8 h-8 mx-auto text-[var(--foreground-muted)] opacity-40" />
+                                        <p className="text-xs text-[var(--foreground-muted)]">
+                                            No biometric devices enrolled yet. Register your current device above to enable instant login.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2.5">
+                                        {passkeys.map((p) => {
+                                            const pDomain = p.domain ? p.domain.toLowerCase() : '';
+                                            const isMatchingCurrentDomain = pDomain && pDomain === currentDomain.toLowerCase();
+                                            const friendlyDomainName = getDomainFriendlyName(p.domain);
+
+                                            return (
+                                                <div
+                                                    key={p.credentialId}
+                                                    className={`p-3.5 bg-[var(--card-background)] border rounded-xl flex items-center justify-between gap-3 shadow-xs transition-all ${isMatchingCurrentDomain ? 'border-emerald-500/40 ring-1 ring-emerald-500/20' : 'border-[var(--border-color)]'}`}
+                                                >
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isMatchingCurrentDomain ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'}`}>
+                                                            <Fingerprint className="w-5 h-5" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <p className="text-xs font-bold text-[var(--foreground)] truncate">
+                                                                    {p.deviceName || 'Enrolled Device'}
+                                                                </p>
+                                                                {isMatchingCurrentDomain ? (
+                                                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1 shrink-0">
+                                                                        <CheckCircle className="w-3 h-3" /> Current Domain
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--background-muted)] text-[var(--foreground-muted)] border border-[var(--border-color)] flex items-center gap-1 shrink-0">
+                                                                        <Globe className="w-3 h-3" /> {friendlyDomainName}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-[10px] text-[var(--foreground-muted)] flex-wrap mt-0.5">
+                                                                <span className="font-mono text-[var(--foreground-muted)] truncate">
+                                                                    Domain: {p.domain || 'All / Legacy'}
+                                                                </span>
+                                                                <span>•</span>
+                                                                <span>Added: {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'Recently'}</span>
+                                                                {p.lastUsedAt && (
+                                                                    <>
+                                                                        <span>•</span>
+                                                                        <span>Last used: {new Date(p.lastUsedAt).toLocaleDateString()}</span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => handleDeletePasskey(p.credentialId)}
+                                                        isLoading={deletingCredentialId === p.credentialId}
+                                                        className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20 shrink-0 text-xs py-1 px-2.5 h-8"
+                                                        title={`Remove passkey for ${friendlyDomainName}`}
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 )}
                             </div>
-                        </div>
 
-                        {/* Enrollment Box */}
-                        {isCurrentDeviceEnrolled ? (
-                            <div className="border border-emerald-500/30 bg-emerald-500/10 p-5 rounded-xl space-y-3">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                    <div className="flex items-start gap-2.5">
-                                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
-                                            <CheckCircle className="w-4 h-4" />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-semibold text-sm text-emerald-800 dark:text-emerald-300">
-                                                This Device is Registered & Ready
-                                            </h3>
-                                            <p className="text-xs text-[var(--foreground-muted)] mt-1 leading-relaxed">
-                                                Your biometric passkey (Fingerprint / Touch ID / Face ID) is active on this device. When you log in next time, you will see a <strong>1-Tap Login</strong> option.
-                                            </p>
-                                        </div>
+                            {/* Multi-Domain Explanatory Note */}
+                            {otherDomainPasskeys.length > 0 && !isCurrentDeviceEnrolled && (
+                                <div className="p-3.5 bg-amber-500/10 border border-amber-500/25 rounded-xl text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                                    <div className="font-bold flex items-center gap-1.5">
+                                        <Info className="w-4 h-4 shrink-0" />
+                                        Why is registration required per domain?
                                     </div>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={handleRegisterPasskey}
-                                        isLoading={isRegisteringPasskey}
-                                        className="border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 shrink-0 text-xs px-3 h-8 self-start sm:self-center"
-                                    >
-                                        <Fingerprint className="w-3.5 h-3.5 mr-1" />
-                                        Add Another Key
-                                    </Button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="border border-[var(--border-color)] p-6 rounded-xl space-y-4 bg-[var(--background-muted)]">
-                                <h3 className="font-semibold text-sm text-[var(--foreground)] flex items-center gap-2">
-                                    <Smartphone className="w-4 h-4 text-[var(--primary-color)]" /> Register Current Device
-                                </h3>
-                                <p className="text-xs text-[var(--foreground-muted)] leading-relaxed">
-                                    Tap the button below to register this phone or computer. Your device will prompt you to verify your fingerprint, face, or PIN.
-                                </p>
-                                <div>
-                                    <Button
-                                        onClick={handleRegisterPasskey}
-                                        isLoading={isRegisteringPasskey}
-                                        className="flex items-center gap-2"
-                                    >
-                                        <Fingerprint className="w-4 h-4" />
-                                        Register This Device
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Enrolled Devices List */}
-                        <div className="space-y-3">
-                            <h3 className="font-semibold text-sm text-[var(--foreground)]">
-                                Enrolled Passkeys & Devices {isLoadingPasskeys ? '' : `(${passkeys.length})`}
-                            </h3>
-
-                            {isLoadingPasskeys ? (
-                                <div className="p-8 border border-[var(--border-color)] rounded-xl bg-[var(--background-muted)]/40 flex flex-col items-center justify-center space-y-3 text-center animate-in fade-in duration-200">
-                                    <Loader className="w-6 h-6 animate-spin text-[var(--primary-color)]" />
-                                    <span className="text-xs font-medium text-[var(--foreground-muted)] animate-pulse">
-                                        Loading registered passkeys...
-                                    </span>
-                                </div>
-                            ) : passkeys.length === 0 ? (
-                                <div className="p-6 border border-dashed border-[var(--border-color)] rounded-xl text-center space-y-2">
-                                    <Fingerprint className="w-8 h-8 mx-auto text-[var(--foreground-muted)] opacity-40" />
-                                    <p className="text-xs text-[var(--foreground-muted)]">
-                                        No biometric devices enrolled yet. Register your current device above to enable instant login.
+                                    <p className="text-[11px] leading-relaxed text-amber-700/90 dark:text-amber-300/90">
+                                        Under the W3C WebAuthn security standard, biometric credentials created on one domain (e.g., GitHub Pages or Cloudflare) cannot be read by another domain (e.g., Google AI Studio). To sign in with 1-Tap on <strong>{currentDomainFriendly}</strong>, register this domain once above.
                                     </p>
-                                </div>
-                            ) : (
-                                <div className="space-y-2">
-                                    {passkeys.map((p) => (
-                                        <div
-                                            key={p.credentialId}
-                                            className="p-3.5 bg-[var(--card-background)] border border-[var(--border-color)] rounded-xl flex items-center justify-between gap-3 shadow-xs"
-                                        >
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                <div className="w-9 h-9 rounded-lg bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center shrink-0">
-                                                    <Fingerprint className="w-5 h-5" />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="text-xs font-bold text-[var(--foreground)] truncate">
-                                                        {p.deviceName || 'Enrolled Device'}
-                                                    </p>
-                                                    <p className="text-[10px] text-[var(--foreground-muted)]">
-                                                        Added: {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'Recently'}
-                                                        {p.lastUsedAt && ` • Last used: ${new Date(p.lastUsedAt).toLocaleDateString()}`}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => handleDeletePasskey(p.credentialId)}
-                                                isLoading={deletingCredentialId === p.credentialId}
-                                                className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20 shrink-0 text-xs py-1 px-2.5 h-8"
-                                            >
-                                                <Trash2 className="w-3.5 h-3.5 mr-1" />
-                                                Remove
-                                            </Button>
-                                        </div>
-                                    ))}
                                 </div>
                             )}
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
+
             </Card>
         </div>
     );

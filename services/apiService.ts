@@ -1478,6 +1478,7 @@ export const verifyPasskeyRegistration = (
         attestationObject: string;
         publicKey?: string;
         deviceName: string;
+        domain?: string;
     }
 ): Promise<{ success: boolean; message: string; credentialId: string }> => {
     return callApi('verifyPasskeyRegistration', payload, sessionId);
@@ -1491,15 +1492,17 @@ export const deletePasskey = (sessionId: string, credentialId: string): Promise<
     return callApi('deletePasskey', { credentialId }, sessionId);
 };
 
-export const getPasskeyAuthOptions = (mobileNumber?: string): Promise<{
+export const getPasskeyAuthOptions = (mobileNumber?: string, domain?: string): Promise<{
     challenge: string;
     timeout: number;
     rpId: string;
     allowCredentials: { id: string; type: string }[];
     userFound?: boolean;
 }> => {
-    return callApi('getPasskeyAuthOptions', { mobileNumber: mobileNumber || '' }, null);
+    const currentDomain = domain || (typeof window !== 'undefined' ? window.location.hostname : '');
+    return callApi('getPasskeyAuthOptions', { mobileNumber: mobileNumber || '', domain: currentDomain }, null);
 };
+
 
 export const verifyPasskeyAuth = (payload: {
     credentialId: string;

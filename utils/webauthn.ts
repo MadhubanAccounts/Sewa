@@ -133,7 +133,7 @@ export async function isBiometricsAvailable(): Promise<boolean> {
 }
 
 /**
- * Local device recognition storage for 1-tap quick login
+ * Local device recognition storage for 1-tap quick login (Domain-Aware)
  */
 const PASSKEY_LOCAL_STORAGE_KEY = 'bk_passkey_enrolled_user';
 
@@ -142,13 +142,41 @@ export interface LocalPasskeyUser {
     name: string;
     mobileNumber: string;
     enrolledAt: string;
+    domain?: string;
 }
 
-export function getLocalPasskeyUser(): LocalPasskeyUser | null {
+export function getCurrentDomain(): string {
+    if (typeof window === 'undefined') return '';
+    return window.location.hostname.toLowerCase();
+}
+
+export function getDomainFriendlyName(domain?: string): string {
+    const d = (domain || getCurrentDomain()).toLowerCase();
+    if (!d) return 'Unknown Domain';
+    if (d.includes('github.io')) return 'GitHub Pages';
+    if (d.includes('pages.dev') || d.includes('cloudflare')) return 'Cloudflare Pages';
+    if (d.includes('run.app') || d.includes('ais-')) return 'Google AI Studio';
+    if (d === 'localhost' || d === '127.0.0.1') return 'Localhost Dev';
+    return d;
+}
+
+/**
+ * Retrieves the enrolled passkey user for the specified domain (defaults to current domain).
+ * If requireDomainMatch is true, verifies that the enrolled domain matches current domain.
+ */
+export function getLocalPasskeyUser(targetDomain?: string, requireDomainMatch: boolean = false): LocalPasskeyUser | null {
     try {
         const stored = localStorage.getItem(PASSKEY_LOCAL_STORAGE_KEY);
         if (!stored) return null;
-        return JSON.parse(stored) as LocalPasskeyUser;
+        const user = JSON.parse(stored) as LocalPasskeyUser;
+        const currentDomain = (targetDomain || getCurrentDomain()).toLowerCase();
+
+        if (requireDomainMatch && user.domain) {
+            if (user.domain.toLowerCase() !== currentDomain) {
+                return null;
+            }
+        }
+        return user;
     } catch {
         return null;
     }
@@ -156,7 +184,12 @@ export function getLocalPasskeyUser(): LocalPasskeyUser | null {
 
 export function setLocalPasskeyUser(data: LocalPasskeyUser): void {
     try {
-        localStorage.setItem(PASSKEY_LOCAL_STORAGE_KEY, JSON.stringify(data));
+        const currentDomain = getCurrentDomain();
+        const enrichedData: LocalPasskeyUser = {
+            ...data,
+            domain: data.domain || currentDomain
+        };
+        localStorage.setItem(PASSKEY_LOCAL_STORAGE_KEY, JSON.stringify(enrichedData));
     } catch (e) {
         console.warn('[WebAuthn] Failed to store local passkey user hint:', e);
     }
@@ -167,3 +200,4 @@ export function clearLocalPasskeyUser(): void {
         localStorage.removeItem(PASSKEY_LOCAL_STORAGE_KEY);
     } catch {}
 }
+

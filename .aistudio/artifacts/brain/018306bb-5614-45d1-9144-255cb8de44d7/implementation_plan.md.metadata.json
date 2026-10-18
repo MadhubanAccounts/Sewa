@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for redesigning New Despatch Wizard header and item display with compact category icons, circular step pills, and compact stacked summary cards for added items.",
-  "updatedAt": "2026-10-14T11:59:24.948325579Z",
+  "summary": "Revised implementation plan to enable domain-specific passkey registration, including UI updates for origin-based grouping and registration in MyProfile.",
+  "updatedAt": "2026-10-18T12:50:05.095150230Z",
   "requestFeedback": true,
   "userFacing": true
 }

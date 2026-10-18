@@ -586,9 +586,11 @@ export interface WebAuthnCredential {
     publicKey?: string;
     counter?: number;
     deviceName: string;
+    domain?: string;
     createdAt: string;
     lastUsedAt?: string;
 }
+
 
 // ============================================================================
 // FARMING (DADI GULZAR UPVAN) PRODUCE DESPATCH MODULE TYPES

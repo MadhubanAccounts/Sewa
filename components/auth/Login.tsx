@@ -13,7 +13,7 @@ import { WorkstationSkeleton } from '../common/WorkstationSkeleton';
 import { SkeletonLoader } from '../ui/SkeletonLoader';
 import { ThemeToggle } from '../layout/ThemeToggle';
 import { useTheme } from '../../hooks/useTheme';
-import { base64urlToBuffer, bufferToBase64url, isBiometricsAvailable, isWebAuthnPermitted, getLocalPasskeyUser, clearLocalPasskeyUser, LocalPasskeyUser } from '../../utils/webauthn';
+import { base64urlToBuffer, bufferToBase64url, isBiometricsAvailable, isWebAuthnPermitted, getLocalPasskeyUser, clearLocalPasskeyUser, LocalPasskeyUser, getCurrentDomain, getDomainFriendlyName } from '../../utils/webauthn';
 
 // Global variable to persist GSI initialization status across react component re-mounts
 let gsiInitialized = false;
@@ -720,11 +720,13 @@ const Login: React.FC = () => {
         isBiometricsAvailable().then(supported => {
             setIsHardwareSupported(supported);
         });
+        const currentDomain = getCurrentDomain();
         const enrolled = getLocalPasskeyUser();
         if (enrolled) {
             setLocalPasskeyUser(enrolled);
+            const isCurrentDomainMatch = !enrolled.domain || enrolled.domain.toLowerCase() === currentDomain.toLowerCase();
             const cleanEnrolled = String(enrolled.mobileNumber || '').replace(/[^0-9]/g, '').slice(-10);
-            if (cleanEnrolled.length === 10 && !mobileNumber) {
+            if (isCurrentDomainMatch && cleanEnrolled.length === 10 && !mobileNumber) {
                 setMobileNumber(cleanEnrolled);
             }
         }
@@ -743,16 +745,24 @@ const Login: React.FC = () => {
 
         setIsBiometricLoading(true);
         setIsLoading(true);
+        const currentDomain = getCurrentDomain();
+        const domainFriendly = getDomainFriendlyName(currentDomain);
+
         try {
-            // 1. Request authentication challenge from backend
-            const options = await api.getPasskeyAuthOptions(targetMobile);
+            // 1. Request authentication challenge from backend scoped to current domain
+            const options = await api.getPasskeyAuthOptions(targetMobile, currentDomain);
 
             if (!window.PublicKeyCredential) {
                 throw new Error('WebAuthn / Passkeys are not supported on this device/browser.');
             }
 
+            // Check if server returned 0 credentials for this specific mobile number on this domain
+            if (options.allowCredentials && options.allowCredentials.length === 0 && targetMobile) {
+                throw new Error(`NO_CREDENTIALS_FOR_DOMAIN:${targetMobile}`);
+            }
+
             // 2. Prepare PublicKeyCredentialRequestOptions
-            // If targetMobile has registered credentials, restrict to them.
+            // If targetMobile has registered credentials for this domain, restrict to them.
             // If allowCredentials is empty or undefined, pass undefined to let the platform authenticator look for any resident passkey on this device.
             const allowedCreds: PublicKeyCredentialDescriptor[] | undefined = (options.allowCredentials && options.allowCredentials.length > 0)
                 ? options.allowCredentials.map((c: any) => ({
@@ -764,7 +774,7 @@ const Login: React.FC = () => {
             const requestOptions: PublicKeyCredentialRequestOptions = {
                 challenge: base64urlToBuffer(options.challenge),
                 timeout: options.timeout || 60000,
-                rpId: options.rpId || window.location.hostname,
+                rpId: options.rpId || currentDomain || window.location.hostname,
                 allowCredentials: allowedCreds,
                 userVerification: 'preferred'
             };
@@ -795,35 +805,43 @@ const Login: React.FC = () => {
                 mobileNumber: targetMobile
             });
 
-            // Automatically re-save local hint so 1-tap quick sign-in is immediately restored
+            // Automatically re-save local hint with current domain so 1-tap quick sign-in is immediately restored
             if (session) {
                 const cleanPhone = String(session.primaryMobile || targetMobile || '').replace(/[^0-9]/g, '').slice(-10);
-                setLocalPasskeyUser({
+                const updatedLocalUser: LocalPasskeyUser = {
                     userId: session.userId,
                     name: session.name,
                     mobileNumber: cleanPhone,
-                    enrolledAt: new Date().toISOString()
-                });
+                    enrolledAt: new Date().toISOString(),
+                    domain: currentDomain
+                };
+                setLocalPasskeyUser(updatedLocalUser);
             }
 
             toast('✓ Biometric authentication successful!', 'success');
             loginWithSession(session);
         } catch (error: any) {
             const msg = error?.message || 'Biometric authentication failed.';
-            if (msg.includes('publickey-credentials') || msg.includes('Permissions Policy') || msg.includes('cross-origin child frames')) {
+            if (msg.startsWith('NO_CREDENTIALS_FOR_DOMAIN:')) {
+                const phone = msg.split(':')[1];
+                toast(
+                    `No biometric passkey registered for +91 ${phone} on ${domainFriendly} (${currentDomain}). Passkeys are domain-specific. Please log in with Telegram or OTP, then register this domain in My Profile ➔ Biometrics.`,
+                    'error'
+                );
+            } else if (msg.includes('publickey-credentials') || msg.includes('Permissions Policy') || msg.includes('cross-origin child frames')) {
                 console.warn('[Login] Biometrics not allowed in embedded iframe:', msg);
                 toast('Biometrics are restricted in this preview frame. Please open the app in a standalone tab or use Telegram/OTP.', 'info');
             } else if (msg.includes('NotAllowedError') || msg.includes('cancelled') || error?.name === 'NotAllowedError') {
                 if (!targetMobile && !localPasskeyUser) {
-                    toast('No biometric passkey found on this device. Please enter your mobile number or sign in with Telegram / OTP.', 'info');
+                    toast(`No biometric passkey found on this device for ${domainFriendly}. Please enter your mobile number or sign in with Telegram / OTP.`, 'info');
                 } else {
                     toast('Biometric prompt was cancelled.', 'info');
                 }
             } else if (msg.includes('Unrecognized passkey credential') || msg.includes('not found') || msg.includes('not registered')) {
                 toast(
                     targetMobile 
-                        ? `No biometric passkey is registered for +91 ${targetMobile} yet. Please log in with Telegram or OTP first, then register this device in My Profile ➔ Biometrics.`
-                        : 'No biometric passkey registered on this device yet. Please enter your mobile number and log in with Telegram or OTP first, then register this device in My Profile ➔ Biometrics.',
+                        ? `No biometric passkey is registered for +91 ${targetMobile} on ${domainFriendly} (${currentDomain}). Please log in with Telegram or OTP first, then register this domain in My Profile ➔ Biometrics.`
+                        : `No biometric passkey registered on ${domainFriendly} (${currentDomain}) yet. Please enter your mobile number and log in with Telegram or OTP first, then register this domain in My Profile ➔ Biometrics.`,
                     'error'
                 );
             } else {
@@ -834,6 +852,7 @@ const Login: React.FC = () => {
             setIsBiometricLoading(false);
             setIsLoading(false);
         }
+
     };
     
     if (miniAppToken) {
@@ -1070,54 +1089,103 @@ const Login: React.FC = () => {
                         <Card className="shadow-2xl rounded-2xl animate-in fade-in zoom-in duration-500 p-4 sm:p-6 border border-[var(--border)]">
                             {step === 1 && (
                                 <div className="space-y-4 sm:space-y-6">
-                                    {/* 1-Tap Quick Passkey Login Card (if previously enrolled on this device) */}
-                                    {localPasskeyUser && (
-                                        <div className="p-3 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 border border-emerald-500/25 rounded-xl space-y-2.5 animate-in fade-in duration-300">
-                                            <div className="flex items-center justify-between gap-3">
-                                                <div className="flex items-center gap-2.5 min-w-0">
-                                                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                                                    <Fingerprint className="w-4 h-4" />
+                                    {/* 1-Tap Quick Passkey Login Card (Domain-Aware) */}
+                                    {localPasskeyUser && (() => {
+                                        const currentHost = getCurrentDomain();
+                                        const isDomainMatch = !localPasskeyUser.domain || localPasskeyUser.domain.toLowerCase() === currentHost.toLowerCase();
+                                        
+                                        if (isDomainMatch) {
+                                            return (
+                                                <div className="p-3 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 border border-emerald-500/25 rounded-xl space-y-2.5 animate-in fade-in duration-300">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <div className="flex items-center gap-2.5 min-w-0">
+                                                            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                                                <Fingerprint className="w-4 h-4" />
+                                                            </div>
+                                                            <div className="min-w-0 text-left">
+                                                                <p className="text-xs font-bold text-[var(--foreground)] truncate">
+                                                                    Sign in as {localPasskeyUser.name}
+                                                                </p>
+                                                                <p className="text-[10px] text-[var(--foreground-muted)] truncate">
+                                                                    {localPasskeyUser.mobileNumber ? `+91 ${localPasskeyUser.mobileNumber}` : 'Enrolled Account'} • {getDomainFriendlyName(currentHost)}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            onClick={() => handleBiometricLogin(localPasskeyUser.mobileNumber)}
+                                                            isLoading={isBiometricLoading}
+                                                            className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 text-xs px-3 h-8 shadow-sm flex items-center gap-1.5 cursor-pointer"
+                                                        >
+                                                            <Fingerprint className="w-3.5 h-3.5" />
+                                                            1-Tap Login
+                                                        </Button>
+                                                    </div>
+                                                    <div className="flex items-center justify-between px-1 text-[11px] text-[var(--foreground-muted)]">
+                                                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                                                            Enrolled on {getDomainFriendlyName(currentHost)}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                clearLocalPasskeyUser();
+                                                                setLocalPasskeyUser(null);
+                                                                setMobileNumber('');
+                                                                toast('Device memory cleared. You can now type any mobile number.', 'info');
+                                                            }}
+                                                            className="text-[var(--primary-color)] hover:underline font-medium cursor-pointer"
+                                                        >
+                                                            Switch account / Clear
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                <div className="min-w-0 text-left">
-                                                    <p className="text-xs font-bold text-[var(--foreground)] truncate">
-                                                        Sign in as {localPasskeyUser.name}
-                                                    </p>
-                                                    <p className="text-[10px] text-[var(--foreground-muted)] truncate">
-                                                        {localPasskeyUser.mobileNumber ? `+91 ${localPasskeyUser.mobileNumber}` : 'Enrolled Account'} • Biometrics Enrolled
-                                                    </p>
+                                            );
+                                        }
+
+                                        return (
+                                            <div className="p-3 bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 border border-blue-500/25 rounded-xl space-y-2 animate-in fade-in duration-300">
+                                                <div className="flex items-start gap-2.5">
+                                                    <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                                                        <Fingerprint className="w-4 h-4" />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-xs font-bold text-[var(--foreground)] truncate">
+                                                            Passkey enrolled on {getDomainFriendlyName(localPasskeyUser.domain)}
+                                                        </p>
+                                                        <p className="text-[11px] text-[var(--foreground-muted)] mt-0.5 leading-snug">
+                                                            WebAuthn passkeys are cryptographically domain-specific. To enable 1-Tap Login on <strong>{getDomainFriendlyName(currentHost)}</strong>, sign in with Telegram or OTP and register this domain in My Profile.
+                                                        </p>
+                                                        <div className="flex items-center gap-2 mt-2">
+                                                            {localPasskeyUser.mobileNumber && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setMobileNumber(localPasskeyUser.mobileNumber)}
+                                                                    className="text-xs px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors"
+                                                                >
+                                                                    Use +91 {localPasskeyUser.mobileNumber}
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    clearLocalPasskeyUser();
+                                                                    setLocalPasskeyUser(null);
+                                                                    setMobileNumber('');
+                                                                    toast('Device memory cleared.', 'info');
+                                                                }}
+                                                                className="text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)] underline font-medium cursor-pointer ml-1"
+                                                            >
+                                                                Clear hint
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <Button
-                                                type="button"
-                                                size="sm"
-                                                onClick={() => handleBiometricLogin(localPasskeyUser.mobileNumber)}
-                                                isLoading={isBiometricLoading}
-                                                className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 text-xs px-3 h-8 shadow-sm flex items-center gap-1.5 cursor-pointer"
-                                            >
-                                                <Fingerprint className="w-3.5 h-3.5" />
-                                                1-Tap Login
-                                            </Button>
-                                        </div>
-                                        <div className="flex items-center justify-between px-1 text-[11px] text-[var(--foreground-muted)]">
-                                            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                                                Enrolled on this device
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    clearLocalPasskeyUser();
-                                                    setLocalPasskeyUser(null);
-                                                    setMobileNumber('');
-                                                    toast('Device memory cleared. You can now type any mobile number.', 'info');
-                                                }}
-                                                className="text-[var(--primary-color)] hover:underline font-medium cursor-pointer"
-                                            >
-                                                Switch account / Clear
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
+                                        );
+                                    })()}
+
 
                                     {/* Segmented Controller / Method Selector */}
                                     <div className="flex p-1 bg-[var(--card-inset-background)] rounded-xl border border-[var(--border)]">
@@ -1159,9 +1227,10 @@ const Login: React.FC = () => {
                                             {localPasskeyUser && mobileNumber.length === 10 && (
                                                 <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium px-1">
                                                     <Fingerprint className="w-3.5 h-3.5 shrink-0" />
-                                                    <span>Pre-filled from enrolled device for <strong>{localPasskeyUser.name}</strong>. Tap "Clear / Change" above to use another number.</span>
+                                                    <span>Pre-filled for <strong>{localPasskeyUser.name}</strong> ({localPasskeyUser.domain ? getDomainFriendlyName(localPasskeyUser.domain) : 'Enrolled Device'}). Tap "Clear / Change" above to use another number.</span>
                                                 </div>
                                             )}
+
                                             <div className="flex flex-col sm:flex-row gap-2.5">
                                                 <Button 
                                                     type="submit" 
